@@ -17,7 +17,8 @@
     <div class="box">
         <div>STATUS KONEKSI: <span id="status">SCANNING...</span></div>
         <div id="ip_found">Mencari Wemos di Jaringan...</div>
-        <div style="margin-top:10px">Awalan IP: <input id="prefix" value="192.168.43"></div>
+        <div style="margin-top:10px">IP Wemos: <input id="prefix" value="192.168"></div>
+        <div style="color:#888;font-size:.75em;margin-top:6px">Isi <b>192.168</b> = cari otomatis (Wemos di angka akhir .99)<br><b>192.168.43</b> = cek semua .1 sampai .254<br><b>192.168.43.57</b> = IP lengkap (paling cepat)</div>
         <div id="dbg"></div>
     </div>
 
@@ -58,31 +59,49 @@
             startLoop();
         }
 
-        // 1. Scan IP otomatis (diulang tiap 5 detik sampai ketemu)
-        async function startScan() {
-            if (isFound) return;
-            scanRound++;
-            $('status').innerText = "SCANNING... (putaran " + scanRound + ")";
-            const prefix = $('prefix').value.trim();
-            localStorage.setItem('prefix', prefix);
+        // 1. Scan IP otomatis (diulang sampai ketemu)
+        // Awalan 2 bagian (mis. 192.168)  -> coba 192.168.0.99 ... 192.168.255.99   (Wemos dikunci di .99)
+        // Awalan 3 bagian (mis. 192.168.43) -> coba 192.168.43.1 ... 192.168.43.254
+        // IP lengkap (mis. 192.168.43.57)   -> coba alamat itu saja
+        const FIXED_HOST = 99;
 
-            // coba IP terakhir yang berhasil lebih dulu
-            const last = localStorage.getItem('lastIP');
+        function buildList(prefix) {
+            const parts = prefix.split('.').filter(x => x !== '');
             const list = [];
-            if (last) list.push(last);
-            for (let i = 1; i < 255; i++) list.push(`${prefix}.${i}`);
+            const last = localStorage.getItem('lastIP');
+            if (last) list.push(last);                       // IP terakhir dicoba paling dulu
+            if (parts.length === 4) {
+                list.push(parts.join('.'));                  // IP lengkap -> coba langsung 1 alamat itu
+            } else if (parts.length === 2) {
+                for (let c = 0; c <= 255; c++) list.push(`${parts[0]}.${parts[1]}.${c}.${FIXED_HOST}`);
+            } else if (parts.length === 3) {
+                list.push(`${parts[0]}.${parts[1]}.${parts[2]}.${FIXED_HOST}`);
+                for (let i = 1; i < 255; i++) list.push(`${parts[0]}.${parts[1]}.${parts[2]}.${i}`);
+            }
+            return list;
+        }
 
-            list.forEach(ip => {
-                req(ip).then(d => { if (d.core === "DUMMY") found(ip); })
-                       .catch(e => { lastErr = e.name + ": " + e.message; });
-            });
+        async function startScan() {
+            while (!isFound) {
+                scanRound++;
+                $('status').innerText = "SCANNING... (putaran " + scanRound + ")";
+                const prefix = $('prefix').value.trim();
+                localStorage.setItem('prefix', prefix);
+                const list = buildList(prefix);
+                if (list.length === 0) { $('dbg').innerText = "Isian tidak valid (contoh: 192.168.43.57)"; }
 
-            setTimeout(() => {
+                // dikirim bertahap (64 sekaligus) supaya HP tidak kewalahan
+                for (let i = 0; i < list.length && !isFound; i += 64) {
+                    await Promise.allSettled(list.slice(i, i + 64).map(ip =>
+                        req(ip).then(d => { if (d.core === "DUMMY") found(ip); })
+                               .catch(e => { lastErr = e.name + ": " + e.message; })
+                    ));
+                }
                 if (!isFound) {
                     $('dbg').innerText = "Belum ketemu. Error terakhir: " + (lastErr || "-");
-                    startScan();
+                    await new Promise(r => setTimeout(r, 2000));
                 }
-            }, 5000);
+            }
         }
 
         // 2. Loop ambil data
@@ -108,7 +127,7 @@
             $('gps_stat').innerText = "GPS tidak didukung browser ini";
         }
 
-        $('prefix').value = localStorage.getItem('prefix') || "192.168.43";
+        $('prefix').value = localStorage.getItem('prefix') || "192.168";
         startScan();
     </script>
 </body>
