@@ -1,134 +1,690 @@
 <!DOCTYPE html>
-<html>
+<html lang="id">
 <head>
-    <meta charset="UTF-8">
-    <title>ECU DUMMY TESTER</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body { background: #000; color: #fff; font-family: monospace; text-align: center; padding: 20px; }
-        .box { border: 2px solid #333; padding: 20px; border-radius: 15px; margin-bottom: 10px; }
-        .val { font-size: 3em; font-weight: bold; color: #00e676; }
-        #status { color: #ffeb3b; }
-        #dbg { color: #888; font-size: .8em; margin-top: 8px; word-break: break-all; }
-        input { background: #111; color: #fff; border: 1px solid #555; border-radius: 6px; padding: 6px; width: 130px; font-family: monospace; }
-    </style>
+<meta charset="UTF-8">
+<title>ECU DASHBOARD</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#000;color:#fff;font-family:sans-serif;text-align:center}
+  #app{max-width:520px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column}
+  header{position:sticky;top:0;z-index:20;background:#111;border-bottom:2px solid #333;padding-top:env(safe-area-inset-top)}
+  .top{display:flex;align-items:center;gap:6px;padding:8px;font-family:monospace;font-size:12px;font-weight:bold}
+  .top .sp1{flex:1}
+  button{font-family:inherit;cursor:pointer}
+  .bt{background:#222;color:#fff;border:1px solid #555;border-radius:8px;padding:8px 10px;font-size:12px;font-weight:bold}
+  .chip2{background:#ff1744;color:#fff;border:0;border-radius:14px;padding:6px 10px;font-size:12px;font-weight:bold}
+  .chip2.ok{background:#00e676;color:#000}
+  .rec{background:#2a0000;color:#ff1744;border:1px solid #ff1744;border-radius:8px;padding:8px 10px;font-size:12px;font-weight:bold}
+  .rec.on{background:#ff1744;color:#fff;animation:blink 1s infinite}
+  @keyframes blink{50%{background:#7a0020}}
+  .conn{padding:0 8px 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px}
+  .conn input{flex:1;min-width:120px;background:#000;color:#fff;border:1px solid #555;border-radius:8px;padding:9px;font-size:14px;font-family:monospace}
+  #connMsg{width:100%;text-align:left;color:#888;font-size:11px}
+  #toast{display:none;background:#00695c;color:#fff;font-size:12px;font-weight:bold;padding:8px;text-align:left}
+  #warn{display:none;background:#ff1744;color:#fff;font-size:13px;font-weight:bold;padding:7px;animation:blink2 .5s infinite}
+  @keyframes blink2{50%{opacity:.45}}
+  main{flex:1;padding:8px}
+  .pg{display:none}
+  .card{background:#111;border:1px solid #333;border-radius:12px;padding:8px 10px;margin-bottom:8px;min-width:0}
+  .lb{font-size:11px;font-weight:bold;color:#ccc}
+  .big{font-family:monospace;font-weight:bold;line-height:1.15;font-size:clamp(32px,11vw,52px)}
+  .br{height:10px;background:#222;border:1px solid #444;border-radius:5px;overflow:hidden;position:relative;margin:4px 0}
+  .br>div{height:100%;width:0}
+  .g2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .g4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px}
+  .tile{background:#111;border:1px solid #333;border-radius:10px;padding:6px 2px}
+  .tv{font-family:monospace;font-size:16px;font-weight:bold;color:#00e676}
+  .sp{width:100%;height:28px}.sp polyline{fill:none;stroke:#9e9e9e;stroke-width:1.5}
+  @keyframes fr{0%{background:#111}50%{background:#ff1744}100%{background:#111}}
+  .flash{animation:fr .4s infinite;border-color:#ff1744!important}
+  .mini{font-size:11px;color:#aaa;text-align:left;line-height:1.6}
+  nav{position:sticky;bottom:0;z-index:20;display:flex;background:#151515;border-top:1px solid #333;padding-bottom:env(safe-area-inset-bottom)}
+  nav button{flex:1;background:none;border:0;border-top:3px solid transparent;color:#888;font-size:12px;font-weight:bold;padding:13px 0}
+  nav button.on{color:#fff;border-top-color:#ffea00}
+  .pill{display:inline-block;padding:3px 10px;border-radius:10px;font-size:12px;font-weight:bold;color:#000}
+  .row{display:flex;gap:8px;align-items:center}.row>*{flex:1;min-width:0}
+  .mk{background:#111;border:1px solid #333;border-radius:10px;padding:8px 2px}
+  .mv{font-family:monospace;font-size:15px;font-weight:bold;color:#ffeb3b}
+  .mk.hit{border-color:#00e676}.mk.hit .mv{color:#00e676}
+  .inp{background:#000;color:#fff;border:1px solid #555;border-radius:6px;padding:8px;font-size:14px;width:100%}
+  table.t{width:100%;border-collapse:collapse;font-family:monospace;font-size:12px}
+  table.t th{color:#ffeb3b;padding:5px 2px;border-bottom:1px solid #333}
+  table.t td{padding:6px 2px;border-bottom:1px solid #222}
+  table.t td.l{text-align:left;max-width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  table.t td.best{color:#00e676;font-weight:bold}
+  .x{background:none;border:0;color:#ff1744;font-size:15px;font-weight:bold}
+  .chip{display:inline-block;background:#222;border:1px solid #444;color:#fff;border-radius:8px;padding:8px 11px;margin:2px;font-size:12px;font-weight:bold;cursor:pointer}
+  .chip.on{background:#2196f3;border-color:#1976d2}
+  .chip.f.on{background:#9c27b0;border-color:#7b1fa2}
+  .chip.d.on{background:#ff9800;color:#000;border-color:#e65100}
+  .chip.c.on{background:#ff9800;color:#000;border-color:#e65100}
+  .chip.off{opacity:.35}
+  .hmw{overflow:auto;max-height:62vh;border:1px solid #333;border-radius:8px}
+  table.hm{border-collapse:collapse;margin:0 auto;font-family:'Courier New',Courier,monospace;font-size:11px}
+  .hm th,.hm td{border:1px solid #333;width:45px;min-width:45px;height:30px;text-align:center;position:relative}
+  .hm th{background:#222;color:#ffeb3b;font-weight:bold;position:sticky;top:0;z-index:10}
+  .hm td.tp{background:#222;color:#fff;font-weight:bold;position:sticky;left:0;z-index:9}
+  .hm th.cn{left:0;z-index:11;color:#fff}
+  .hm td.em{color:#333}
+  .hm td.cell{font-weight:900;cursor:pointer}
+  .hm td.sel{outline:3px solid #fff;outline-offset:-3px}
+  @keyframes pu{0%,100%{box-shadow:inset 0 0 0 2px #fff}50%{box-shadow:inset 0 0 0 2px transparent}}
+  .hm td.cur{animation:pu .8s infinite}
+  .pl{background:#ff1744;color:#fff}.po{background:#ff9800;color:#000}.pg2{background:#00e676;color:#000}.pb{background:#2196f3;color:#fff}
+  #hist{display:none;position:fixed;inset:0;z-index:50;background:#000;overflow:auto;padding:env(safe-area-inset-top) 10px 20px;text-align:left}
+  .hi{background:#111;border:1px solid #333;border-radius:10px;padding:10px;margin-bottom:8px}
+  #demoPanel{display:none;border-top:1px solid #333;margin-top:10px;padding-top:10px}
+  .dr{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px;color:#ccc}.dr input{flex:1}
+</style>
 </head>
 <body>
-    <div class="box">
-        <div>STATUS KONEKSI: <span id="status">SCANNING...</span></div>
-        <div id="ip_found">Mencari Wemos di Jaringan...</div>
-        <div style="margin-top:10px">IP Wemos: <input id="prefix" value="192.168"></div>
-        <div style="color:#888;font-size:.75em;margin-top:6px">Isi <b>192.168</b> = cari otomatis (Wemos di angka akhir .99)<br><b>192.168.43</b> = cek semua .1 sampai .254<br><b>192.168.43.57</b> = IP lengkap (paling cepat)</div>
-        <div id="dbg"></div>
+<div id="app">
+<header>
+  <div class="top">
+    <button class="chip2" id="chip">TERPUTUS</button>
+    <span id="gps" style="color:#888">GPS: --</span>
+    <span class="sp1"></span>
+    <button class="rec" id="recBtn">&#9679; REC</button>
+    <button class="bt" id="histBtn">RIWAYAT</button>
+  </div>
+  <div class="conn" id="conn">
+    <input id="ipIn" placeholder="IP Wemos, mis. 192.168.43.57" inputmode="decimal" autocomplete="off">
+    <button class="bt" id="btConn" style="background:#00e676;color:#000;border:0">SAMBUNG</button>
+    <button class="bt" id="btDemo">DEMO</button>
+    <div id="connMsg">Isi IP lengkap Wemos (lihat di daftar perangkat hotspot HP), lalu tekan SAMBUNG.</div>
+  </div>
+  <div id="toast"></div>
+  <div id="warn">AFR KURUS di beban tinggi! Kurangi gas</div>
+</header>
+
+<main>
+<!-- ================= LIVE ================= -->
+<section class="pg" id="p_live">
+  <div class="g2">
+    <div class="card" id="cRpm"><div class="lb">ENGINE RPM</div><div class="big" id="rpmv">0</div>
+      <div class="br"><div id="rbar"></div><span style="position:absolute;left:58.3%;top:0;bottom:0;width:1px;background:#888"></span><span style="position:absolute;left:75%;top:0;bottom:0;width:1px;background:#888"></span></div>
+      <svg class="sp" viewBox="0 0 300 30" preserveAspectRatio="none"><polyline id="rspk"/></svg></div>
+    <div class="card"><div class="lb">SPEED (GPS)</div><div class="big" id="spdv">0</div>
+      <div class="br"><div id="sbar" style="background:#00e676"></div></div>
+      <svg class="sp" viewBox="0 0 300 30" preserveAspectRatio="none"><polyline id="sspk"/></svg></div>
+    <div class="card"><div class="lb">TPS (%)</div><div class="big" id="tpsv">0</div>
+      <div class="br"><div id="tbar" style="background:#00e676"></div></div>
+      <svg class="sp" viewBox="0 0 300 30" preserveAspectRatio="none"><polyline id="tspk"/></svg></div>
+    <div class="card"><div class="lb">AFR</div><div class="big" id="afrv">0.0</div>
+      <div class="br"><div id="abar"></div></div>
+      <svg class="sp" viewBox="0 0 300 30" preserveAspectRatio="none"><polyline id="aspk"/></svg></div>
+  </div>
+  <div class="g4">
+    <div class="tile"><div class="lb">TEMP</div><div class="tv" id="tTemp">0</div></div>
+    <div class="tile"><div class="lb">FUEL CORR</div><div class="tv" id="tFc">0</div></div>
+    <div class="tile"><div class="lb">BASEMAP</div><div class="tv" id="tBm">0</div></div>
+    <div class="tile"><div class="lb">IGN</div><div class="tv" id="tIg">0</div></div>
+    <div class="tile"><div class="lb">INJ</div><div class="tv" id="tInj">0</div></div>
+    <div class="tile"><div class="lb">VBATT</div><div class="tv" id="tVb" style="color:#2196f3">0</div></div>
+    <div class="tile"><div class="lb">CORE</div><div class="tv" id="tCore">-</div></div>
+    <div class="tile"><div class="lb">DATA REC</div><div class="tv" id="tRec" style="color:#888">0</div></div>
+  </div>
+  <div class="card mini" id="cellinfo">Sel sekarang: belum ada data</div>
+  <div id="demoPanel">
+    <div class="mini" style="margin-bottom:8px">Kontrol simulasi (hanya muncul di mode DEMO)</div>
+    <div class="row" style="margin-bottom:8px">
+      <button class="bt" id="bGas">TAHAN = GAS</button><button class="bt" id="bAuto">AUTO RUN</button><button class="bt" id="bBrake">REM</button>
     </div>
+    <div class="dr"><span style="width:90px;text-align:left">Tenaga mesin</span><input type="range" id="sAcc" min="0.85" max="1.2" step="0.01" value="1.05"><output id="oAcc">1.05</output></div>
+    <div class="dr"><span style="width:90px;text-align:left">Offset AFR</span><input type="range" id="sOff" min="-2" max="3" step="0.1" value="0"><output id="oOff">0.0</output></div>
+    <div class="row"><span style="flex:none;font-size:12px;color:#ccc;width:90px;text-align:left">Core simulasi</span><button class="bt" id="bC1">Core 1</button><button class="bt" id="bC2" style="border-color:#00e676">Core 2</button></div>
+  </div>
+</section>
 
-    <div class="box">
-        <h2>ENGINE RPM (DUMMY)</h2>
-        <div class="val" id="rpm">0</div>
+<!-- ================= TIME ATTACK ================= -->
+<section class="pg" id="p_ta">
+  <div class="card">
+    <div class="row"><div><span class="pill" id="tapill" style="background:#ffea00">TUNGGU DIAM</span></div>
+      <div class="big" id="taT" style="color:#ffeb3b;font-size:34px">0.00s</div></div>
+    <div class="row" style="margin-top:6px">
+      <div><div class="lb">SPEED</div><div class="big" id="taV" style="font-size:24px">0</div></div>
+      <div><div class="lb">JARAK (m)</div><div class="big" id="taD" style="font-size:24px">0</div></div>
     </div>
+  </div>
+  <div class="row" style="margin-bottom:8px">
+    <div class="mk" id="mk60"><div class="lb">0-60</div><div class="mv">--</div></div>
+    <div class="mk" id="mk100"><div class="lb">0-100</div><div class="mv">--</div></div>
+    <div class="mk" id="mk400"><div class="lb">400 m</div><div class="mv">--</div></div>
+    <div class="mk" id="mkTop"><div class="lb">TOP</div><div class="mv">--</div></div>
+  </div>
+  <div class="card" id="lastRun" style="display:none;text-align:left">
+    <div class="mini" id="lastRunTxt"></div>
+    <div style="text-align:right;margin-top:6px"><button class="bt" id="delLast" style="border-color:#ff1744;color:#ff1744">HAPUS RUN INI</button></div>
+  </div>
+  <div class="card">
+    <div class="lb" style="text-align:left;margin-bottom:4px">Catatan setting (nomor run bertambah otomatis)</div>
+    <input class="inp" id="labelIn" maxlength="24">
+  </div>
+  <div class="card">
+    <table class="t"><thead><tr><th style="text-align:left">SETTING</th><th>0-60</th><th>0-100</th><th>400 m</th><th>TOP</th><th></th></tr></thead><tbody id="taBody"></tbody></table>
+    <div class="mini" style="margin-top:4px">Hijau = terbaik di kolom itu. Run otomatis tersimpan di HP.</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px"><button class="bt" id="taExp">EKSPOR .HTML</button><button class="bt" id="taClear">HAPUS SEMUA</button></div>
+  </div>
+  <div class="card">
+    <div class="lb" style="text-align:left">Kurva speed: <span style="color:#ffeb3b">kuning</span> terakhir, <span style="color:#00e676">hijau</span> terbaik</div>
+    <svg viewBox="0 0 330 170" width="100%" id="taChart"></svg>
+  </div>
+  <div class="mini">Catatan: speed time attack dari GPS HP (update sekitar 1 kali per detik), jadi angka bisa meleset sekitar 0,5 sampai 1 detik. Cocok untuk membandingkan sebelum dan sesudah setting dalam kondisi yang sama.</div>
+</section>
 
-    <div class="box">
-        <h2>GPS SPEED</h2>
-        <div class="val" id="speed">0</div>
-        <div id="gps_stat">GPS: SEARCHING...</div>
+<!-- ================= HEATMAP ================= -->
+<section class="pg" id="p_hm">
+  <div style="text-align:left">
+    <div id="hmSrc"></div>
+    <div id="hmModes"><span class="chip on" data-m="AVG">AVG</span><span class="chip" data-m="MAX">MAX</span><span class="chip" data-m="MIN">MIN</span><span class="chip f" data-m="FREQ">FREQ</span><span class="chip d off" data-m="DELTA" id="chipD">&Delta; PEMBANDING</span></div>
+    <div id="hmCores"></div>
+    <div class="row" style="margin:6px 0;font-size:12px;color:#ccc;flex-wrap:wrap">
+      <div style="flex:none">Min. data/sel <input class="inp" id="hmMin" type="number" value="1" min="1" style="width:56px;display:inline-block"></div>
+      <label style="flex:none"><input type="checkbox" id="hmCompact"> ringkas kolom kosong</label>
+      <label style="flex:none" id="pctWrap"><input type="checkbox" id="hmPct"> FREQ dalam %</label>
     </div>
+    <div style="text-align:right;margin-bottom:6px"><button class="bt" id="hmBase">SIMPAN PEMBANDING</button> <button class="bt" id="hmClear">RESET</button></div>
+  </div>
+  <div class="mini" id="hmSum" style="margin-bottom:6px"></div>
+  <div class="hmw"><table class="hm"><thead id="hmHead"></thead><tbody id="hmBody"></tbody></table></div>
+  <div class="mini" id="hmLegend" style="margin-top:6px"></div>
+  <div class="card" style="margin-top:8px"><div class="mini" id="hmDetail">Tap sel untuk lihat detail. Kotak yang berkedip = posisi mesin sekarang. Heatmap mulai kosong tiap REC baru.</div></div>
+  <div class="card"><div class="mini" id="hmLists"></div></div>
+</section>
+</main>
 
-    <script>
-        let wemosIP = "";
-        let isFound = false;
-        let scanRound = 0;
-        let lastErr = "";
-        const $ = id => document.getElementById(id);
+<nav id="nav"><button class="on" data-p="live">LIVE</button><button data-p="ta">TIME ATTACK</button><button data-p="hm">HEATMAP</button></nav>
 
-        // Opsi fetch: 'targetAddressSpace' memberi tahu Chrome bahwa tujuannya jaringan lokal
-        // (supaya halaman HTTPS boleh memanggil http://192.168.x.x setelah izin diberikan)
-        function req(ip) {
-            const ctl = new AbortController();
-            setTimeout(() => ctl.abort(), 1500);
-            return fetch(`http://${ip}/data`, { mode: 'cors', targetAddressSpace: 'local', signal: ctl.signal, cache: 'no-store' })
-                .then(r => r.json());
-        }
+<div id="hist">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0"><b style="font-size:16px">Riwayat sesi rekaman</b><button class="bt" id="histClose">TUTUP</button></div>
+  <div id="histList" class="mini">Memuat...</div>
+</div>
+</div>
 
-        function found(ip) {
-            if (isFound) return;
-            isFound = true;
-            wemosIP = ip;
-            localStorage.setItem('lastIP', ip);
-            $('status').innerText = "LOCKED!";
-            $('ip_found').innerText = "Ditemukan di: " + ip;
-            startLoop();
-        }
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const ls={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const pad2=n=>String(n).padStart(2,'0');
+const num=v=>{const s=String(v==null?'':v).trim();return /^-?\d+(\.\d+)?$/.test(s)?parseFloat(s):NaN;};
+const nz=v=>{const n=num(v);return isNaN(n)?0:n;};
 
-        // 1. Scan IP otomatis (diulang sampai ketemu)
-        // Awalan 2 bagian (mis. 192.168)  -> coba 192.168.0.99 ... 192.168.255.99   (Wemos dikunci di .99)
-        // Awalan 3 bagian (mis. 192.168.43) -> coba 192.168.43.1 ... 192.168.43.254
-        // IP lengkap (mis. 192.168.43.57)   -> coba alamat itu saja
-        const FIXED_HOST = 99;
+/* ================= KONSTANTA (sama dengan kode heatmap lama) ================= */
+const TPS_BINS=[0,2,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,100];
+const RPM_BINS=[];for(let r=1000;r<=12000;r+=250)RPM_BINS.push(r);
+const RPM_STEP=250,RPM_LO=1000,RPM_HI=12000;
+const AFR_LO=8,AFR_HI=25,RPM_MIN=500;           // data di luar ini dianggap noise
+const POLL_MS=25;                                 // jeda antar permintaan ke Wemos (makin kecil = makin rapat)
+const MAXH=200;
 
-        function buildList(prefix) {
-            const parts = prefix.split('.').filter(x => x !== '');
-            const list = [];
-            const last = localStorage.getItem('lastIP');
-            if (last) list.push(last);                       // IP terakhir dicoba paling dulu
-            if (parts.length === 4) {
-                list.push(parts.join('.'));                  // IP lengkap -> coba langsung 1 alamat itu
-            } else if (parts.length === 2) {
-                for (let c = 0; c <= 255; c++) list.push(`${parts[0]}.${parts[1]}.${c}.${FIXED_HOST}`);
-            } else if (parts.length === 3) {
-                list.push(`${parts[0]}.${parts[1]}.${parts[2]}.${FIXED_HOST}`);
-                for (let i = 1; i < 255; i++) list.push(`${parts[0]}.${parts[1]}.${parts[2]}.${i}`);
-            }
-            return list;
-        }
+const afrCol=a=>a>16?'#ff1744':a>=14?'#ff9800':a>=12?'#00e676':'#2196f3';
+const afrCls=a=>a>16?'pl':a>=14?'po':a>=12?'pg2':'pb';
+const tpsBin=t=>{const b=TPS_BINS.find(x=>x>=t);return b===undefined?100:b;};
+const rpmBin=r=>Math.max(RPM_LO,Math.min(RPM_HI,Math.floor(r/RPM_STEP)*RPM_STEP));
+const coreKey=c=>/^\d+$/.test(String(c))?String(c):'?';
 
-        async function startScan() {
-            while (!isFound) {
-                scanRound++;
-                $('status').innerText = "SCANNING... (putaran " + scanRound + ")";
-                const prefix = $('prefix').value.trim();
-                localStorage.setItem('prefix', prefix);
-                const list = buildList(prefix);
-                if (list.length === 0) { $('dbg').innerText = "Isian tidak valid (contoh: 192.168.43.57)"; }
+/* ================= STATE ================= */
+const S={rpm:0,tps:0,afr:0,spd:0,temp:0,fc:0,bm:0,it:0,ijt:0,vb:0,core:'-'};
+const hist={rpm:[],spd:[],tps:[],afr:[]};
+let page='live',lastRpm=0,frameCount=0,hz=0,lastWarn=0;
+let connected=false,demo=false,ip=ls.get('ecu_ip',''),gen=0,failCount=0,lastSeq=-1;
+let rec=false,rows=[],recId=null,recT0=0,savedN=0,chunkNo=0;
+let idb=null;
 
-                // dikirim bertahap (64 sekaligus) supaya HP tidak kewalahan
-                for (let i = 0; i < list.length && !isFound; i += 64) {
-                    await Promise.allSettled(list.slice(i, i + 64).map(ip =>
-                        req(ip).then(d => { if (d.core === "DUMMY") found(ip); })
-                               .catch(e => { lastErr = e.name + ": " + e.message; })
-                    ));
-                }
-                if (!isFound) {
-                    $('dbg').innerText = "Belum ketemu. Error terakhir: " + (lastErr || "-");
-                    await new Promise(r => setTimeout(r, 2000));
-                }
-            }
-        }
+/* ================= PENYIMPANAN (IndexedDB untuk sesi rekam) ================= */
+function idbOpen(){return new Promise((res,rej)=>{
+  if(typeof indexedDB==='undefined'){rej(new Error('no idb'));return;}
+  const r=indexedDB.open('ecu_dash',1);
+  r.onupgradeneeded=()=>{const d=r.result;d.createObjectStore('sessions',{keyPath:'id'});d.createObjectStore('chunks',{keyPath:'k'});};
+  r.onsuccess=()=>{idb=r.result;res();};r.onerror=()=>rej(r.error);});}
+function idbPut(store,val){return new Promise((res,rej)=>{if(!idb){rej(new Error('no idb'));return;}
+  const tx=idb.transaction(store,'readwrite');tx.objectStore(store).put(val);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
+function idbAll(store,range){return new Promise((res,rej)=>{if(!idb){res([]);return;}
+  const rq=idb.transaction(store).objectStore(store).getAll(range);rq.onsuccess=()=>res(rq.result);rq.onerror=()=>rej(rq.error);});}
+function idbDelSession(id){return new Promise((res,rej)=>{if(!idb){res();return;}
+  const tx=idb.transaction(['sessions','chunks'],'readwrite');
+  tx.objectStore('sessions').delete(id);
+  tx.objectStore('chunks').delete(IDBKeyRange.bound(id+':',id+':\uffff'));
+  tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}
+async function loadRows(id){
+  const ch=await idbAll('chunks',IDBKeyRange.bound(id+':',id+':\uffff'));
+  ch.sort((a,b)=>a.k<b.k?-1:1);
+  let out=[];ch.forEach(c=>{out=out.concat(c.rows);});return out;
+}
 
-        // 2. Loop ambil data
-        function startLoop() {
-            setInterval(() => {
-                req(wemosIP).then(d => {
-                    $('rpm').innerText = d.rpm;
-                    $('dbg').innerText = "";
-                }).catch(e => { $('dbg').innerText = "Data gagal: " + e.name + ": " + e.message; });
-            }, 100);
-        }
+/* ================= HEATMAP: DATA ================= */
+let HMLIVE={},HMSES=null,hmSource='live',hmSesName='',hmMode='AVG',hmCore='ALL',hmSel=null;
+let BASE=ls.get('ecu_base',null),BASEINFO=ls.get('ecu_baseinfo','');
+const curM=()=>hmSource==='live'?HMLIVE:(HMSES||{});
+function addCell(M,core,tps,rpm,afr){
+  if(!(afr>=AFR_LO&&afr<=AFR_HI)||rpm<RPM_MIN||tps<0||tps>100)return;
+  const tb=tpsBin(tps),rb=rpmBin(rpm);
+  const m=M[core]||(M[core]={});const row=m[tb]||(m[tb]={});
+  const c=row[rb]||(row[rb]={min:1e9,max:-1e9,sum:0,count:0});
+  if(afr<c.min)c.min=afr;if(afr>c.max)c.max=afr;c.sum+=afr;c.count++;
+}
+function buildM(list){
+  const M={};
+  list.forEach(r=>{const t=num(r.tps),p=num(r.rpm),a=num(r.afr);if(isNaN(t)||isNaN(p)||isNaN(a))return;addCell(M,coreKey(String(r.core==null?'':r.core).trim()),t,p,a);});
+  return M;
+}
+function view(M,sel){
+  const out={};
+  const cores=sel==='ALL'?Object.keys(M):[String(sel)];
+  cores.forEach(k=>{const m=M[k];if(!m)return;for(const t in m)for(const r in m[t]){
+    const s=m[t][r];const o=(out[t]||(out[t]={}))[r]||(out[t][r]={min:1e9,max:-1e9,sum:0,count:0});
+    o.min=Math.min(o.min,s.min);o.max=Math.max(o.max,s.max);o.sum+=s.sum;o.count+=s.count;}});
+  return out;
+}
 
-        // 3. GPS HP (butuh HTTPS atau localhost)
-        if ("geolocation" in navigator) {
-            navigator.geolocation.watchPosition((pos) => {
-                let kmh = Math.round((pos.coords.speed || 0) * 3.6);
-                $('speed').innerText = kmh;
-                $('gps_stat').innerText = "GPS: LOCKED";
-            }, (err) => {
-                $('gps_stat').innerText = "GPS ERROR: " + err.message;
-            }, { enableHighAccuracy: true });
-        } else {
-            $('gps_stat').innerText = "GPS tidak didukung browser ini";
-        }
+/* ================= PIPA DATA: 1 FRAME DARI ECU ================= */
+function onFrame(d){
+  frameCount++;
+  let r=nz(d.rpm);
+  if(lastRpm-r>4000&&lastRpm>1000)r=lastRpm;       // buang lonjakan turun palsu (dari kode lama)
+  lastRpm=r;
+  S.rpm=r;S.tps=nz(d.tps);S.afr=nz(d.afr);S.temp=nz(d.temp);S.fc=nz(d.fc);S.bm=nz(d.bm);
+  S.it=nz(d.it);S.ijt=nz(d.ijt);S.vb=nz(d.vbatt);S.core=String(d.core==null?'-':d.core).trim();
+  hist.rpm.push(S.rpm);hist.spd.push(S.spd);hist.tps.push(S.tps);hist.afr.push(S.afr);
+  if(hist.rpm.length>MAXH){hist.rpm.shift();hist.spd.shift();hist.tps.shift();hist.afr.shift();}
+  addCell(HMLIVE,coreKey(S.core),S.tps,S.rpm,S.afr);
+  if(rec)rows.push(Object.assign({},d,{speed:String(Math.round(S.spd))}));
+}
 
-        $('prefix').value = localStorage.getItem('prefix') || "192.168";
-        startScan();
-    </script>
+/* ================= TIME ATTACK ================= */
+const TA={state:'WAIT',still:null,el:0,dist:0,m:{},top:0,topT:0,trace:[],nextTr:0,lastT:null,lastV:0};
+let label=ls.get('ecu_label','Setting A'),nextNo=1;
+let runs=ls.get('ecu_runs',[]),runsDirty=true;
+
+function feedSpeed(tMs,v){
+  const t=tMs/1000;
+  if(TA.lastT==null){TA.lastT=t;TA.lastV=v;}
+  const t0=TA.lastT,v0=TA.lastV;TA.lastT=t;TA.lastV=v;
+  if(TA.state==='RUN'){if(t>t0)stepRun(t-t0,v0,v);return;}
+  if(v<=1){
+    if(TA.still==null)TA.still=t;
+    TA.state=(t-TA.still>=0.9)?'READY':'WAIT';
+    return;
+  }
+  if(TA.state==='READY'){
+    if(v<=2)return;                                // 1-2 km/h: tetap SIAP (hindari GPS goyang)
+    const f=v>v0?Math.max(0,Math.min(1,(2-v0)/(v-v0))):0;
+    const ts=t0+(t-t0)*f;                          // saat tepat melewati 2 km/h
+    TA.state='RUN';TA.m={};TA.dist=0;TA.el=0;TA.top=0;TA.topT=0;TA.trace=[[0,2]];TA.nextTr=0.25;
+    stepRun(Math.max(0.0001,t-ts),2,v);
+    return;
+  }
+  TA.still=null;TA.state='WAIT';
+}
+function stepRun(dt,v0,v){
+  const inc=(v+v0)/2/3.6*dt,pd=TA.dist;
+  TA.dist+=inc;TA.el+=dt;
+  [60,100].forEach(th=>{if(TA.m[th]==null&&v>=th&&v>v0){TA.m[th]=TA.el-dt*(1-(th-v0)/(v-v0));}});
+  if(TA.m.d400==null&&TA.dist>=400&&inc>0){const f=(400-pd)/inc;TA.m.d400=TA.el-dt*(1-f);TA.m.v400=v0+(v-v0)*f;}
+  if(v>TA.top){TA.top=v;TA.topT=TA.el;}
+  if(TA.el>=TA.nextTr){TA.trace.push([TA.el,v]);TA.nextTr=TA.el+0.25;}
+  if(v<=1&&TA.el>2)finishRun();
+}
+function thin(tr){if(tr.length<=150)return tr;const k=Math.ceil(tr.length/150),o=[];for(let i=0;i<tr.length;i+=k)o.push(tr[i]);o.push(tr[tr.length-1]);return o;}
+function finishRun(){
+  if(TA.state!=='RUN')return;
+  TA.state='WAIT';TA.still=TA.lastT;
+  if(TA.top>=20){
+    const r={id:Date.now(),label:label,no:nextNo++,sid:rec?recId:null,m60:TA.m[60],m100:TA.m[100],d400:TA.m.d400,v400:TA.m.v400,top:TA.top,topT:TA.topT,trace:thin(TA.trace)};
+    runs.unshift(r);if(runs.length>50)runs.pop();
+    ls.set('ecu_runs',runs);runsDirty=true;
+    toast('Run selesai: '+esc(r.label)+' #'+r.no+' | 0-60 '+fmtT(r.m60)+' | 0-100 '+fmtT(r.m100)+' | 400 m '+fmtT(r.d400)+' | TOP '+Math.round(r.top));
+  }
+}
+const fmtT=v=>v==null?'--':v.toFixed(2)+'s';
+
+/* ================= TAMPILAN: LIVE ================= */
+function spark(id,arr,lo,hi){
+  let p='';const n=arr.length;
+  for(let i=0;i<n;i++){
+    const x=300-(n-1-i)/(MAXH-1)*300,val=Math.min(hi,Math.max(lo,arr[i]));
+    p+=x.toFixed(0)+','+(28-(val-lo)/(hi-lo)*26).toFixed(1)+' ';
+  }
+  $(id).setAttribute('points',p);
+}
+function renderLive(){
+  $('rpmv').textContent=Math.round(S.rpm);
+  const rb=$('rbar');rb.style.width=Math.min(S.rpm/12000*100,100)+'%';
+  rb.style.background=S.rpm>=9000?'#ff1744':S.rpm>=7000?'#ffea00':'#00e676';
+  $('cRpm').classList.toggle('flash',S.rpm>=10000);
+  $('spdv').textContent=Math.round(S.spd);$('sbar').style.width=Math.min(S.spd/150*100,100)+'%';
+  $('tpsv').textContent=Math.round(S.tps);$('tbar').style.width=Math.min(S.tps,100)+'%';
+  const c=afrCol(S.afr);
+  $('afrv').textContent=S.afr.toFixed(1);$('afrv').style.color=c;
+  $('abar').style.width=Math.max(0,Math.min((S.afr-10)/10*100,100))+'%';$('abar').style.background=c;
+  spark('rspk',hist.rpm,0,12000);spark('sspk',hist.spd,0,150);spark('tspk',hist.tps,0,100);spark('aspk',hist.afr,10,20);
+  const tc=S.temp>100?'#ff1744':S.temp>90?'#ffea00':'#00e676';
+  $('tTemp').textContent=S.temp.toFixed(0)+'°';$('tTemp').style.color=tc;
+  $('tFc').textContent=S.fc.toFixed(0)+'%';$('tBm').textContent=S.bm.toFixed(2);
+  $('tIg').textContent=S.it.toFixed(1)+'°';$('tInj').textContent=S.ijt.toFixed(0)+'°';
+  $('tVb').textContent=S.vb.toFixed(1);$('tCore').textContent=S.core;
+  $('tRec').textContent=rec?rows.length:'-';$('tRec').style.color=rec?'#ff1744':'#888';
+  const M=curM(),V=view(M,'ALL'),tb=tpsBin(S.tps),rbn=rpmBin(S.rpm),cell=V[tb]&&V[tb][rbn];
+  let tot=0;for(const t in V)for(const r in V[t])tot+=V[t][r].count;
+  $('cellinfo').innerHTML=cell?'Sel sekarang: TPS ≤'+tb+'% / RPM '+rbn+'-'+(rbn+RPM_STEP-1)+' &nbsp; rata-rata AFR <b style="color:'+afrCol(cell.sum/cell.count)+'">'+(cell.sum/cell.count).toFixed(1)+'</b> &nbsp; n='+cell.count+' ('+(cell.count*100/tot).toFixed(1)+'% data)':'Sel sekarang: belum ada data';
+  const lean=S.afr>16&&S.tps>=50;
+  $('warn').style.display=lean?'block':'none';
+  if(lean&&Date.now()-lastWarn>3000){lastWarn=Date.now();if(navigator.vibrate)navigator.vibrate(200);}
+}
+
+/* ================= TAMPILAN: TIME ATTACK ================= */
+function setMk(id,txt,hit){const e=$(id);e.querySelector('.mv').textContent=txt;e.classList.toggle('hit',hit);}
+function renderTA(){
+  const st=TA.state,p=$('tapill');
+  p.textContent=st==='RUN'?'BERJALAN':st==='READY'?'SIAP':'TUNGGU DIAM';
+  p.style.background=st==='RUN'?'#00e676':st==='READY'?'#2196f3':'#ffea00';
+  $('taT').textContent=TA.el.toFixed(2)+'s';
+  $('taV').textContent=Math.round(S.spd);$('taD').textContent=Math.round(TA.dist);
+  setMk('mk60',fmtT(TA.m[60]),TA.m[60]!=null);setMk('mk100',fmtT(TA.m[100]),TA.m[100]!=null);setMk('mk400',fmtT(TA.m.d400),TA.m.d400!=null);
+  setMk('mkTop',TA.top>0?Math.round(TA.top)+' km/h':'--',TA.top>0&&st!=='RUN');
+  if(runsDirty){runsDirty=false;renderRuns();}
+}
+function bestOf(list){
+  const b={};[['m60',1],['m100',1],['d400',1],['top',0]].forEach(([k,low])=>{const v=list.map(r=>r[k]).filter(x=>x!=null);b[k]=v.length?(low?Math.min(...v):Math.max(...v)):null;});
+  return b;
+}
+function renderRuns(){
+  const best=bestOf(runs);
+  $('taBody').innerHTML=runs.length?runs.map((r,i)=>'<tr><td class="l">'+(i===0?'* ':'')+esc(r.label)+' #'+r.no+'</td>'+
+    [['m60',1],['m100',1],['d400',1],['top',0]].map(([k,low])=>{
+      const v=r[k];return '<td class="'+(v!=null&&v===best[k]?'best':'')+'">'+(v==null?'--':(low?v.toFixed(2)+'s':Math.round(v)))+'</td>';}).join('')+
+    '<td><button class="x" data-del="'+r.id+'">&times;</button></td></tr>').join(''):'<tr><td colspan="6" class="mini" style="text-align:center">Belum ada run. Berhenti dulu, lalu gas dari diam.</td></tr>';
+  const lr=runs[0];
+  $('lastRun').style.display=lr?'block':'none';
+  if(lr)$('lastRunTxt').innerHTML='Run terakhir: <b>'+esc(lr.label)+' #'+lr.no+'</b><br>0-60 '+fmtT(lr.m60)+' · 0-100 '+fmtT(lr.m100)+' · 400 m '+fmtT(lr.d400)+(lr.v400?' ('+Math.round(lr.v400)+' km/h)':'')+' · TOP '+Math.round(lr.top)+' km/h';
+  $('taChart').innerHTML=chartSvg(runs);
+}
+function chartSvg(list){
+  let bestRun=null;list.forEach(r=>{if(r.m100!=null&&(!bestRun||r.m100<bestRun.m100))bestRun=r;});
+  if(!bestRun)list.forEach(r=>{if(r.m60!=null&&(!bestRun||r.m60<bestRun.m60))bestRun=r;});
+  const sel=[];if(list[0])sel.push([list[0],'#ffeb3b']);if(bestRun&&bestRun!==list[0])sel.push([bestRun,'#00e676']);
+  let tmax=20;sel.forEach(([r])=>{const l=r.trace[r.trace.length-1];if(l&&l[0]>tmax)tmax=l[0];});
+  tmax=Math.ceil(tmax/5)*5;
+  let g='<g stroke="#222">';[0,30,60,90,120].forEach(v=>{const y=150-v/120*136;g+='<line x1="34" y1="'+y+'" x2="320" y2="'+y+'"/>';});
+  g+='</g><g font-size="11" font-family="sans-serif" fill="#aaa"><text x="2" y="154">0</text><text x="2" y="18">120</text><text x="34" y="167">0 s</text><text x="320" y="167" text-anchor="end">'+tmax+' s</text></g>';
+  sel.forEach(([r,c])=>{g+='<polyline fill="none" stroke="'+c+'" stroke-width="2" points="'+r.trace.map(([t,v])=>(34+t/tmax*286).toFixed(1)+','+(150-Math.min(v,120)/120*136).toFixed(1)).join(' ')+'"/>';});
+  return g;
+}
+
+/* ================= TAMPILAN: HEATMAP ================= */
+function cellShow(t,r,c,k,tot,maxc,pct){
+  if(c.count<k)return null;
+  if(hmMode==='FREQ'){
+    const ratio=Math.sqrt(c.count/(maxc||1));
+    return {txt:pct?(c.count*100/tot).toFixed(1):String(c.count),cls:'',st:'background:hsl('+(220*(1-ratio)).toFixed(0)+',70%,'+(30+ratio*12).toFixed(0)+'%);color:#fff'};
+  }
+  if(hmMode==='DELTA'){
+    const b=BASE&&BASE[t]&&BASE[t][r];if(!b||b.count<k)return null;
+    const d=c.sum/c.count-b.sum/b.count,al=Math.min(1,0.3+Math.abs(d)/2).toFixed(2);
+    const bg=d>0.3?'rgba(255,23,68,'+al+')':d<-0.3?'rgba(33,150,243,'+al+')':'#333';
+    return {txt:(d>0?'+':'')+d.toFixed(1),cls:'',st:'background:'+bg+';color:#fff'};
+  }
+  const v=hmMode==='AVG'?c.sum/c.count:hmMode==='MAX'?c.max:c.min;
+  return {txt:v.toFixed(1),cls:afrCls(v),st:''};
+}
+function renderHM(){
+  const M=curM(),k=Math.max(1,parseInt($('hmMin').value)||1),pct=$('hmPct').checked;
+  $('pctWrap').style.display=hmMode==='FREQ'?'inline':'none';
+  $('hmSrc').innerHTML='<span class="chip'+(hmSource==='live'?' on':'')+'" data-s="live">LIVE / REC</span>'+(HMSES?'<span class="chip'+(hmSource==='ses'?' on':'')+'" data-s="ses">SESI: '+esc(hmSesName)+'</span>':'');
+  const cnt={};let all=0;
+  for(const c in M){let n=0;for(const t in M[c])for(const r in M[c][t])n+=M[c][t][r].count;cnt[c]=n;all+=n;}
+  const keys=Object.keys(cnt).sort();
+  $('hmCores').innerHTML='<span class="chip c'+(hmCore==='ALL'?' on':'')+'" data-c="ALL">SEMUA ('+all+')</span>'+keys.map(c=>'<span class="chip c'+(hmCore===c?' on':'')+'" data-c="'+c+'">'+(c==='?'?'CORE ?':'CORE '+c)+' ('+cnt[c]+')</span>').join('');
+  $('chipD').classList.toggle('off',!BASE);
+  document.querySelectorAll('#hmModes .chip').forEach(e=>e.classList.toggle('on',e.dataset.m===hmMode));
+  const V=view(M,hmCore);
+  let tot=0,maxc=0;for(const t in V)for(const r in V[t]){tot+=V[t][r].count;if(V[t][r].count>maxc)maxc=V[t][r].count;}
+  const show={};let n=0,rl=1e9,rh=-1;
+  for(const t in V)for(const r in V[t]){const s=cellShow(+t,+r,V[t][r],k,tot,maxc,pct);if(!s)continue;(show[t]||(show[t]={}))[r]=s;n++;if(+r<rl)rl=+r;if(+r>rh)rh=+r;}
+  $('hmSum').innerHTML='Data: <b style="color:#ffeb3b">'+tot+'</b> &nbsp; Sel tampil: <b style="color:#ffeb3b">'+n+'</b>'+(hmCore!=='ALL'?' &nbsp; (core '+hmCore+')':'')+(hmMode==='DELTA'&&BASEINFO?'<br>Pembanding: '+esc(BASEINFO):'');
+  const compact=$('hmCompact').checked&&n>0;
+  const cols=compact?RPM_BINS.filter(r=>r>=rl&&r<=rh):RPM_BINS;         // default: 45 kolom penuh seperti dulu
+  const cur={t:tpsBin(S.tps),r:rpmBin(S.rpm)},showCur=hmSource==='live';
+  $('hmHead').innerHTML='<tr><th class="cn">TPS\\RPM</th>'+cols.map(r=>'<th>'+r+'</th>').join('')+'</tr>';
+  let b='';
+  TPS_BINS.forEach(t=>{
+    b+='<tr><td class="tp">'+t+'%</td>';
+    cols.forEach(r=>{
+      const s=show[t]&&show[t][r],isCur=showCur&&cur.t===t&&cur.r===r?' cur':'';
+      if(!s){b+='<td class="em'+isCur+'">-</td>';return;}
+      const sel=hmSel&&hmSel.t===t&&hmSel.r===r?' sel':'';
+      b+='<td class="cell '+s.cls+sel+isCur+'" style="'+s.st+'" data-t="'+t+'" data-r="'+r+'">'+s.txt+'</td>';
+    });
+    b+='</tr>';
+  });
+  $('hmBody').innerHTML=b;
+  $('hmLegend').innerHTML=hmMode==='FREQ'?'Angka = jumlah data per sel. Makin merah = makin sering mesin bertahan di titik itu.':
+    hmMode==='DELTA'?'Selisih rata-rata AFR terhadap pembanding. <span style="color:#ff1744">Merah</span> = lebih kurus, <span style="color:#2196f3">biru</span> = lebih kaya.':
+    '<span style="color:#ff1744">Merah &gt;16</span> · <span style="color:#ff9800">Oranye 14-16</span> · <span style="color:#00e676">Hijau 12-13.9</span> · <span style="color:#2196f3">Biru &lt;12</span>';
+  const arr=[];for(const t in V)for(const r in V[t]){const c=V[t][r];if(c.count>=k)arr.push({t:+t,r:+r,avg:c.sum/c.count,n:c.count});}
+  const lean=arr.slice().sort((a,b)=>b.avg-a.avg).slice(0,3),freq=arr.slice().sort((a,b)=>b.n-a.n).slice(0,3),f=x=>'TPS ≤'+x.t+'% / RPM '+x.r;
+  $('hmLists').innerHTML=arr.length?'<b style="color:#ffeb3b">Titik paling kurus</b><br>'+lean.map(x=>'<span style="color:'+afrCol(x.avg)+'">'+x.avg.toFixed(1)+'</span> &nbsp;'+f(x)+' (n='+x.n+')').join('<br>')+
+    '<br><b style="color:#ffeb3b">Paling sering bertahan</b><br>'+freq.map(x=>x.n+' data ('+(x.n*100/tot).toFixed(1)+'%) &nbsp;'+f(x)+' · AFR '+x.avg.toFixed(1)).join('<br>'):'Belum ada data.';
+  if(hmSel)showDetail(V,tot);
+}
+function showDetail(V,tot){
+  const c=V[hmSel.t]&&V[hmSel.t][hmSel.r];
+  if(!c){$('hmDetail').textContent='Sel kosong.';return;}
+  const b=BASE&&BASE[hmSel.t]&&BASE[hmSel.t][hmSel.r];
+  $('hmDetail').innerHTML='TPS ≤'+hmSel.t+'% / RPM '+hmSel.r+'-'+(hmSel.r+RPM_STEP-1)+'<br>Jumlah data: <b>'+c.count+'</b> ('+(c.count*100/tot).toFixed(1)+'%)<br>AFR min <b>'+c.min.toFixed(1)+'</b> · avg <b>'+(c.sum/c.count).toFixed(1)+'</b> · max <b>'+c.max.toFixed(1)+'</b>'+(b?'<br>Pembanding avg: <b>'+(b.sum/b.count).toFixed(1)+'</b> (n='+b.count+')':'');
+}
+
+/* ================= KONEKSI KE WEMOS ================= */
+function toast(html,ms){const t=$('toast');t.innerHTML=html;t.style.display='block';clearTimeout(toast.h);toast.h=setTimeout(()=>{t.style.display='none';},ms||8000);}
+function setConn(ok,msg){
+  connected=ok;
+  $('conn').style.display=ok?'none':'flex';
+  if(msg!==undefined)$('connMsg').textContent=msg;
+  updateChip();
+}
+function updateChip(){
+  const c=$('chip');
+  c.className='chip2'+(connected||demo?' ok':'');
+  c.textContent=demo?'DEMO · '+hz+' Hz':connected?'TERHUBUNG · '+hz+' Hz':'TERPUTUS';
+}
+let wl=null;
+async function keepAwake(){try{if('wakeLock' in navigator&&!wl){wl=await navigator.wakeLock.request('screen');wl.addEventListener('release',()=>{wl=null;});}}catch(e){}}
+function connect(){
+  const v=$('ipIn').value.trim();
+  if(!/^\d{1,3}(\.\d{1,3}){3}$/.test(v)){$('connMsg').textContent='Isi IP lengkap, contoh: 192.168.43.57';return;}
+  stopDemo();ip=v;ls.set('ecu_ip',ip);gen++;failCount=0;lastSeq=-1;
+  $('connMsg').textContent='Menyambung ke '+ip+' ...';
+  pollLoop(gen);
+}
+function pollLoop(g){
+  if(g!==gen||demo)return;
+  const ctl=new AbortController(),to=setTimeout(()=>ctl.abort(),1500);
+  fetch('http://'+ip+'/data',{mode:'cors',targetAddressSpace:'local',signal:ctl.signal,cache:'no-store'})
+  .then(r=>r.json()).then(d=>{
+    clearTimeout(to);failCount=0;
+    if(!connected){setConn(true,'');keepAwake();}
+    const s=parseInt(d.seq)||0;
+    if(s>0&&s!==lastSeq){lastSeq=s;onFrame(d);}
+  }).catch(e=>{
+    clearTimeout(to);failCount++;
+    if(failCount>=3&&connected)setConn(false,'Koneksi putus, mencoba lagi... ('+e.name+')');
+    else if(!connected)$('connMsg').textContent='Belum tersambung ke '+ip+' ('+e.name+': '+e.message+'). Mencoba lagi...';
+  }).finally(()=>{setTimeout(()=>pollLoop(g),failCount>=3?1000:POLL_MS);});
+}
+
+/* ================= GPS HP ================= */
+if('geolocation' in navigator){
+  navigator.geolocation.watchPosition(pos=>{
+    $('gps').textContent='GPS: LOCKED';$('gps').style.color='#00e676';
+    if(demo)return;
+    const v=Math.max(0,(pos.coords.speed||0)*3.6);
+    S.spd=v;feedSpeed(pos.timestamp,v);
+  },err=>{$('gps').textContent='GPS: ERROR';$('gps').style.color='#ff1744';$('gps').title=err.message;},{enableHighAccuracy:true,maximumAge:0,timeout:15000});
+}else{$('gps').textContent='GPS: tidak ada';}
+
+/* ================= DEMO (simulasi, tanpa Wemos) ================= */
+const SIM={rb:1400,tps:0,spd:0,temp:72,core:2,gas:false,auto:false,autoT:0,brake:false,accK:1.05,off:0,seq:0};
+const VMAX=112,ACC0=17;
+function simStep(dt){
+  const g=(SIM.gas||SIM.auto)&&!SIM.brake;
+  SIM.tps+=((g?100:0)-SIM.tps)*Math.min(1,dt*7);
+  const v=SIM.spd;let a;
+  if(SIM.brake)a=-26;else if(g)a=ACC0*SIM.accK*(1-Math.pow(v/VMAX,1.8))*(0.3+0.7*SIM.tps/100);else a=-(2.5+v*0.05);
+  SIM.spd=Math.max(0,Math.min(VMAX,v+a*dt));
+  const target=g?(SIM.spd<18?2600+SIM.spd/18*4900:7500+(SIM.spd-18)/(VMAX-18)*1500):(1400+SIM.spd*30);
+  SIM.rb+=(target-SIM.rb)*Math.min(1,dt*(g?7:4));
+  const rpm=SIM.rb+(Math.random()-.5)*50,load=SIM.tps/100;
+  let afr=14.7-2.4*load+(SIM.tps>55&&rpm>6800&&rpm<8200?1.4:0)+SIM.off+(SIM.core===1?1.2:0)+(Math.random()-.5)*.4;
+  afr=Math.max(9,Math.min(20,afr));
+  SIM.temp+=((70+rpm/12000*38+load*8)-SIM.temp)*dt*0.03;
+  if(SIM.auto&&!SIM.brake){SIM.autoT+=dt;if((TA.state==='RUN'&&TA.dist>=430)||SIM.autoT>70)SIM.brake=true;}
+  if(SIM.brake&&SIM.spd<=0.3){SIM.brake=false;SIM.auto=false;SIM.autoT=0;syncSim();}
+  return {tps:String(Math.round(SIM.tps)),rpm:String(Math.round(rpm)),afr:afr.toFixed(1),core:String(SIM.core),temp:SIM.temp.toFixed(1),
+    fc:String(Math.round((13.4-afr)*4)),bm:(0.8+rpm/12000*1.5+load*0.9).toFixed(2),ijt:'470',it:(8+rpm/12000*26).toFixed(1),vbatt:(12.4+Math.min(rpm,3000)/3000*1.3).toFixed(2),seq:++SIM.seq,t:Date.now()};
+}
+function demoTick(){if(!demo)return;const d=simStep(0.05);S.spd=SIM.spd;onFrame(d);feedSpeed(Date.now(),SIM.spd);}
+function startDemo(){gen++;demo=true;setConn(false);$('conn').style.display='flex';$('demoPanel').style.display='block';$('btDemo').textContent='STOP DEMO';
+  $('connMsg').textContent='Mode DEMO: data simulasi. Kontrol ada di bagian bawah menu LIVE.';updateChip();}
+function stopDemo(){if(!demo)return;demo=false;$('demoPanel').style.display='none';$('btDemo').textContent='DEMO';updateChip();}
+function syncSim(){$('bAuto').textContent=SIM.auto?'AUTO RUN...':'AUTO RUN';$('bGas').style.background=SIM.gas?'#2196f3':'#222';
+  $('bC1').style.borderColor=SIM.core===1?'#00e676':'#555';$('bC2').style.borderColor=SIM.core===2?'#00e676':'#555';}
+
+/* ================= REC + RIWAYAT ================= */
+const fmtDate=ms=>{const d=new Date(ms);return pad2(d.getDate())+'/'+pad2(d.getMonth()+1)+'/'+d.getFullYear()+' '+pad2(d.getHours())+':'+pad2(d.getMinutes());};
+const fmtDur=ms=>{const s=Math.round(ms/1000);return pad2(Math.floor(s/60))+':'+pad2(s%60);};
+async function recToggle(){
+  if(!rec){
+    rec=true;rows=[];savedN=0;chunkNo=0;recId='s'+Date.now();recT0=Date.now();
+    HMLIVE={};hmSource='live';hmSel=null;                  // heatmap mulai kosong tiap REC baru
+    try{await idbPut('sessions',{id:recId,startedAt:recT0,endedAt:recT0,n:0});}catch(e){}
+    keepAwake();toast('REC dimulai. Heatmap dikosongkan.',3000);
+  }else{
+    rec=false;
+    await saveChunk();
+    const meta={id:recId,startedAt:recT0,endedAt:Date.now(),n:rows.length};
+    try{await idbPut('sessions',meta);toast('Sesi tersimpan di Riwayat: '+rows.length+' data, '+fmtDur(meta.endedAt-meta.startedAt)+'.');}
+    catch(e){toast('Penyimpanan di HP tidak tersedia, mengunduh file .html...');download('ECU_LOG_'+recT0+'.html',buildLogHtml(meta,rows,runs.filter(r=>r.sid===recId)));}
+  }
+  updateRecBtn();
+}
+async function saveChunk(){
+  if(savedN>=rows.length)return;
+  const part=rows.slice(savedN);
+  try{await idbPut('chunks',{k:recId+':'+String(chunkNo).padStart(5,'0'),rows:part});chunkNo++;savedN=rows.length;
+      await idbPut('sessions',{id:recId,startedAt:recT0,endedAt:Date.now(),n:rows.length});}catch(e){}
+}
+function updateRecBtn(){const b=$('recBtn');b.className='rec'+(rec?' on':'');b.innerHTML=rec?'&#9632; STOP '+fmtDur(Date.now()-recT0):'&#9679; REC';}
+async function openHist(){
+  $('hist').style.display='block';$('histList').textContent='Memuat...';
+  let list=[];try{list=await idbAll('sessions');}catch(e){}
+  list.sort((a,b)=>b.startedAt-a.startedAt);
+  $('histList').innerHTML=list.length?list.map(s=>'<div class="hi"><b>'+fmtDate(s.startedAt)+'</b><br>'+s.n+' data · '+fmtDur(s.endedAt-s.startedAt)+
+    '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"><button class="bt" data-open="'+s.id+'">BUKA DI HEATMAP</button><button class="bt" data-exp="'+s.id+'">EKSPOR .HTML</button><button class="bt" style="color:#ff1744;border-color:#ff1744" data-delses="'+s.id+'">HAPUS</button></div></div>').join(''):
+    'Belum ada sesi. Tekan REC untuk mulai merekam.';
+}
+async function openSession(id){
+  const list=await loadRows(id);
+  HMSES=buildM(list);hmSesName=fmtDate(+id.slice(1));hmSource='ses';hmCore='ALL';hmSel=null;
+  $('hist').style.display='none';gotoPage('hm');
+}
+async function exportSession(id){
+  const metas=await idbAll('sessions');const meta=metas.find(m=>m.id===id);if(!meta)return;
+  const list=await loadRows(id);
+  download('ECU_LOG_'+meta.startedAt+'.html',buildLogHtml(meta,list,runs.filter(r=>r.sid===id)));
+}
+function download(name,text){
+  const b=new Blob([text],{type:'text/html'}),a=document.createElement('a');
+  a.href=URL.createObjectURL(b);a.download=name;document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1500);
+}
+const baseCss='body{background:#000;color:#fff;font-family:sans-serif;padding:16px}table{border-collapse:collapse;font-family:monospace}th,td{border:1px solid #444;padding:6px 10px;text-align:center}th{color:#ffeb3b}.b{color:#00e676;font-weight:bold}';
+function runsTable(list){
+  const best=bestOf(list);
+  return '<table><tr><th>Setting</th><th>0-60</th><th>0-100</th><th>400 m</th><th>Top (km/h)</th></tr>'+list.map(r=>'<tr><td>'+esc(r.label)+' #'+r.no+'</td>'+
+    [['m60',1],['m100',1],['d400',1],['top',0]].map(([k,low])=>{const v=r[k];return '<td class="'+(v!=null&&v===best[k]?'b':'')+'">'+(v==null?'--':(low?v.toFixed(2)+' s':Math.round(v)))+'</td>';}).join('')+'</tr>').join('')+'</table>';
+}
+function buildLogHtml(meta,list,rr){
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>ECU LOG '+fmtDate(meta.startedAt)+'</title><style>'+baseCss+'</style></head><body>'+
+    '<h2>ECU LOG '+fmtDate(meta.startedAt)+'</h2><p>'+list.length+' data, durasi '+fmtDur(meta.endedAt-meta.startedAt)+'. Buka file ini dengan ECU Log Viewer untuk melihat heatmap.</p>'+
+    (rr.length?'<h3>Time attack pada sesi ini</h3>'+runsTable(rr):'')+
+    '<script>const SAVED_LOGS = '+JSON.stringify(list).replace(/<\//g,'<\\/')+';<\/script></body></html>';
+}
+function buildRunsHtml(list){
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Time Attack</title><style>'+baseCss+'</style></head><body><h2>Catatan Time Attack</h2><p>'+fmtDate(Date.now())+'</p>'+
+    runsTable(list)+'<h3>Kurva speed (kuning = terakhir, hijau = terbaik)</h3><svg viewBox="0 0 330 170" width="480" style="background:#050505">'+chartSvg(list)+'</svg></body></html>';
+}
+
+/* ================= EVENT ================= */
+function gotoPage(p){
+  page=p;
+  document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('on',x.dataset.p===p));
+  ['live','ta','hm'].forEach(x=>$('p_'+x).style.display=x===p?'block':'none');
+  if(p==='ta')runsDirty=true;
+  tick(true);
+}
+$('nav').addEventListener('click',e=>{const b=e.target.closest('button');if(b)gotoPage(b.dataset.p);});
+$('chip').addEventListener('click',()=>{const c=$('conn');c.style.display=c.style.display==='none'?'flex':'none';});
+$('btConn').addEventListener('click',connect);
+$('ipIn').addEventListener('keydown',e=>{if(e.key==='Enter')connect();});
+$('btDemo').addEventListener('click',()=>{if(demo){stopDemo();setConn(false,'Demo dihentikan.');}else startDemo();});
+$('recBtn').addEventListener('click',recToggle);
+$('histBtn').addEventListener('click',openHist);
+$('histClose').addEventListener('click',()=>{$('hist').style.display='none';});
+$('histList').addEventListener('click',async e=>{
+  const b=e.target.closest('button');if(!b)return;
+  if(b.dataset.open)openSession(b.dataset.open);
+  else if(b.dataset.exp)exportSession(b.dataset.exp);
+  else if(b.dataset.delses&&confirm('Hapus sesi ini?')){await idbDelSession(b.dataset.delses);openHist();}
+});
+$('labelIn').addEventListener('input',e=>{label=e.target.value||'Tanpa nama';ls.set('ecu_label',label);nextNo=1;});
+$('taBody').addEventListener('click',e=>{const b=e.target.closest('[data-del]');if(!b)return;runs=runs.filter(r=>String(r.id)!==b.dataset.del);ls.set('ecu_runs',runs);runsDirty=true;});
+$('delLast').addEventListener('click',()=>{runs.shift();ls.set('ecu_runs',runs);runsDirty=true;});
+$('taClear').addEventListener('click',()=>{if(confirm('Hapus semua catatan time attack?')){runs=[];ls.set('ecu_runs',runs);runsDirty=true;}});
+$('taExp').addEventListener('click',()=>{if(runs.length)download('TimeAttack_'+Date.now()+'.html',buildRunsHtml(runs));});
+$('hmModes').addEventListener('click',e=>{const c=e.target.closest('.chip');if(!c)return;if(c.dataset.m==='DELTA'&&!BASE)return;hmMode=c.dataset.m;renderHM();});
+$('hmCores').addEventListener('click',e=>{const c=e.target.closest('.chip');if(!c)return;hmCore=c.dataset.c;hmSel=null;renderHM();});
+$('hmSrc').addEventListener('click',e=>{const c=e.target.closest('.chip');if(!c)return;hmSource=c.dataset.s;hmCore='ALL';hmSel=null;renderHM();});
+$('hmBody').addEventListener('click',e=>{const td=e.target.closest('td.cell');if(!td)return;hmSel={t:+td.dataset.t,r:+td.dataset.r};renderHM();});
+['hmMin','hmCompact','hmPct'].forEach(id=>$(id).addEventListener('change',renderHM));
+$('hmBase').addEventListener('click',()=>{
+  const V=view(curM(),hmCore);BASE={};let n=0;
+  for(const t in V){BASE[t]={};for(const r in V[t]){BASE[t][r]=Object.assign({},V[t][r]);n+=V[t][r].count;}}
+  BASEINFO=n+' data ('+(hmCore==='ALL'?'semua core':'core '+hmCore)+', '+(hmSource==='live'?'live':'sesi '+hmSesName)+')';
+  ls.set('ecu_base',BASE);ls.set('ecu_baseinfo',BASEINFO);renderHM();
+});
+$('hmClear').addEventListener('click',()=>{if(hmSource==='live'){HMLIVE={};}hmSel=null;renderHM();});
+
+$('bGas').addEventListener('pointerdown',()=>{SIM.gas=true;SIM.brake=false;syncSim();});
+['pointerup','pointerleave','pointercancel'].forEach(ev=>$('bGas').addEventListener(ev,()=>{SIM.gas=false;syncSim();}));
+$('bAuto').addEventListener('click',()=>{if(SIM.auto)SIM.brake=true;else{SIM.auto=true;SIM.brake=false;SIM.autoT=0;}syncSim();});
+$('bBrake').addEventListener('click',()=>{SIM.gas=false;SIM.auto=false;SIM.brake=true;syncSim();});
+$('sAcc').addEventListener('input',e=>{SIM.accK=parseFloat(e.target.value);$('oAcc').textContent=SIM.accK.toFixed(2);});
+$('sOff').addEventListener('input',e=>{SIM.off=parseFloat(e.target.value);$('oOff').textContent=SIM.off.toFixed(1);});
+$('bC1').addEventListener('click',()=>{SIM.core=1;syncSim();});
+$('bC2').addEventListener('click',()=>{SIM.core=2;syncSim();});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(connected||demo))keepAwake();});
+
+/* ================= LOOP ================= */
+let tc=0;
+function tick(force){
+  tc++;
+  if(page==='live')renderLive();
+  else if(page==='ta')renderTA();
+  else if(force===true||tc%4===0)renderHM();
+  if(rec)updateRecBtn();
+}
+setInterval(demoTick,50);
+setInterval(()=>tick(false),100);
+setInterval(()=>{hz=frameCount;frameCount=0;updateChip();},1000);
+setInterval(()=>{if(rec)saveChunk();},5000);
+
+$('ipIn').value=ip;$('labelIn').value=label;
+idbOpen().catch(()=>{});
+gotoPage('live');
+if(ip)connect();
+</script>
 </body>
 </html>
