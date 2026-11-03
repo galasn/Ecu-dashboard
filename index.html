@@ -78,6 +78,9 @@
   .hi{background:#111;border:1px solid #333;border-radius:10px;padding:10px;margin-bottom:8px}
   #demoPanel{display:none;border-top:1px solid #333;margin-top:10px;padding-top:10px}
   .dr{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px;color:#ccc}.dr input{flex:1}
+  #pbBar{display:none;background:#1a1a2e;border-top:1px solid #333;padding:6px 8px 4px}
+  #pbBar input[type=range]{flex:4}
+  #taPop{display:none;position:absolute;top:24px;background:rgba(0,0,0,.92);border:1px solid #777;border-radius:8px;padding:6px 8px;font-size:11px;text-align:left;line-height:1.55;z-index:5;max-width:78%;font-family:monospace}
 </style>
 </head>
 <body>
@@ -95,6 +98,10 @@
     <button class="bt" id="btConn" style="background:#00e676;color:#000;border:0">SAMBUNG</button>
     <button class="bt" id="btDemo">DEMO</button>
     <div id="connMsg">Isi IP lengkap Wemos (lihat di daftar perangkat hotspot HP), lalu tekan SAMBUNG.</div>
+  </div>
+  <div id="pbBar">
+    <div class="row"><button class="bt" id="pbPlay">JEDA</button><input type="range" id="pbPos" min="0" max="0" value="0"><button class="bt" id="pbSpd">1x</button><button class="bt" id="pbExit" style="color:#ff1744;border-color:#ff1744">KELUAR</button></div>
+    <div class="mini" id="pbTime" style="padding:4px 0 0"></div>
   </div>
   <div id="toast"></div>
   <div id="warn">AFR KURUS di beban tinggi! Kurangi gas</div>
@@ -170,8 +177,8 @@
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px"><button class="bt" id="taExp">EKSPOR .HTML</button><button class="bt" id="taClear">HAPUS SEMUA</button></div>
   </div>
   <div class="card">
-    <div class="lb" style="text-align:left">Kurva speed: <span style="color:#ffeb3b">kuning</span> terakhir, <span style="color:#00e676">hijau</span> terbaik</div>
-    <svg viewBox="0 0 330 170" width="100%" id="taChart"></svg>
+    <div class="lb" style="text-align:left">Kurva speed &amp; RPM terhadap waktu. <span style="color:#ffeb3b">Kuning</span> = run dipilih (tap baris tabel), <span style="color:#00e676">hijau</span> = terbaik, <span style="color:#fff">putih</span> = run yang sedang diputar (tumbuh mengikuti data). <b>Tap atau geser grafik</b> untuk melihat nilainya.</div>
+    <div id="taCharts" style="position:relative;margin-top:4px"><svg viewBox="0 0 330 360" width="100%" id="taChart" style="touch-action:pan-y;display:block"></svg><div id="taPop"></div></div>
   </div>
   <div class="mini">Catatan: speed time attack dari GPS HP (update sekitar 1 kali per detik), jadi angka bisa meleset sekitar 0,5 sampai 1 detik. Cocok untuk membandingkan sebelum dan sesudah setting dalam kondisi yang sama.</div>
 </section>
@@ -260,7 +267,9 @@ async function loadRows(id){
 /* ================= HEATMAP: DATA ================= */
 let HMLIVE={},HMSES=null,hmSource='live',hmSesName='',hmMode='AVG',hmCore='ALL',hmSel=null;
 let BASE=ls.get('ecu_base',null),BASEINFO=ls.get('ecu_baseinfo','');
-const curM=()=>hmSource==='live'?HMLIVE:(HMSES||{});
+let pb=null,HMPB={},pbRuns=[],pbDrag=false,taFollow=true,pbLive=false,taPick=null,taCur=null,chartMeta={sel:[],tmax:20,rmax:12000};
+const rbuf=[];                                      // 80 frame terakhir (untuk melengkapi RPM sebelum GPS mendeteksi start)
+const curM=()=>pb?HMPB:(hmSource==='live'?HMLIVE:(HMSES||{}));
 function addCell(M,core,tps,rpm,afr){
   if(!(afr>=AFR_LO&&afr<=AFR_HI)||rpm<RPM_MIN||tps<0||tps>100)return;
   const tb=tpsBin(tps),rb=rpmBin(rpm);
@@ -283,8 +292,7 @@ function view(M,sel){
 }
 
 /* ================= PIPA DATA: 1 FRAME DARI ECU ================= */
-function onFrame(d){
-  frameCount++;
+function applyFrame(d,M){
   let r=nz(d.rpm);
   if(lastRpm-r>4000&&lastRpm>1000)r=lastRpm;       // buang lonjakan turun palsu (dari kode lama)
   lastRpm=r;
@@ -292,16 +300,27 @@ function onFrame(d){
   S.it=nz(d.it);S.ijt=nz(d.ijt);S.vb=nz(d.vbatt);S.core=String(d.core==null?'-':d.core).trim();
   hist.rpm.push(S.rpm);hist.spd.push(S.spd);hist.tps.push(S.tps);hist.afr.push(S.afr);
   if(hist.rpm.length>MAXH){hist.rpm.shift();hist.spd.shift();hist.tps.shift();hist.afr.shift();}
-  addCell(HMLIVE,coreKey(S.core),S.tps,S.rpm,S.afr);
+  addCell(M,coreKey(S.core),S.tps,S.rpm,S.afr);
+}
+// Catat RPM/TPS/AFR selama run time attack (sekitar 10 kali per detik) untuk grafik RPM
+function rtPush(absT,rpm,tps,afr){
+  rbuf.push([absT,rpm,tps,afr]);if(rbuf.length>80)rbuf.shift();
+  if(TA.state==='RUN'){const el=absT-TA.t0abs;if(el>=TA.rtNext){TA.rt.push([el,rpm,tps,afr]);TA.rtNext=el+0.1;}}
+}
+function onFrame(d){
+  frameCount++;
+  if(pb)return;                                    // saat putar ulang, data live diabaikan
+  applyFrame(d,HMLIVE);
+  rtPush(Date.now()/1000,S.rpm,S.tps,S.afr);
   if(rec)rows.push(Object.assign({},d,{speed:String(Math.round(S.spd))}));
 }
 
 /* ================= TIME ATTACK ================= */
-const TA={state:'WAIT',still:null,el:0,dist:0,m:{},top:0,topT:0,trace:[],nextTr:0,lastT:null,lastV:0};
+const TA={state:'WAIT',still:null,el:0,dist:0,m:{},top:0,topT:0,trace:[],nextTr:0,lastT:null,lastV:0,t0abs:0,rt:[],rtNext:0};
 let label=ls.get('ecu_label','Setting A'),nextNo=1;
 let runs=ls.get('ecu_runs',[]),runsDirty=true;
 let taSes=null,taSesName='';                       // null = semua run; isi = hanya run dari 1 sesi REC
-const taView=()=>taSes?runs.filter(r=>r.sid===taSes):runs;
+const taView=()=>pb?pbRuns:(taSes?runs.filter(r=>r.sid===taSes):runs);
 
 function feedSpeed(tMs,v){
   const t=tMs/1000;
@@ -310,7 +329,7 @@ function feedSpeed(tMs,v){
   if(TA.state==='RUN'){if(t>t0)stepRun(t-t0,v0,v);return;}
   if(v<=1){
     if(TA.still==null)TA.still=t;
-    TA.state=(t-TA.still>=0.9)?'READY':'WAIT';
+    if(TA.state!=='READY')TA.state=(t-TA.still>=0.9)?'READY':'WAIT';   // sudah SIAP tetap SIAP selama masih diam
     return;
   }
   if(TA.state==='READY'){
@@ -318,6 +337,8 @@ function feedSpeed(tMs,v){
     const f=v>v0?Math.max(0,Math.min(1,(2-v0)/(v-v0))):0;
     const ts=t0+(t-t0)*f;                          // saat tepat melewati 2 km/h
     TA.state='RUN';TA.m={};TA.dist=0;TA.el=0;TA.top=0;TA.topT=0;TA.trace=[[0,2]];TA.nextTr=0.25;
+    TA.t0abs=ts;TA.rt=[];TA.rtNext=0;if(pb)taFollow=true;
+    rbuf.forEach(e=>{if(e[0]>=ts){const el=e[0]-ts;if(el>=TA.rtNext){TA.rt.push([el,e[1],e[2],e[3]]);TA.rtNext=el+0.1;}}});
     stepRun(Math.max(0.0001,t-ts),2,v);
     return;
   }
@@ -333,13 +354,16 @@ function stepRun(dt,v0,v){
   if(v<=1&&TA.el>2)finishRun();
 }
 function thin(tr){if(tr.length<=150)return tr;const k=Math.ceil(tr.length/150),o=[];for(let i=0;i<tr.length;i+=k)o.push(tr[i]);o.push(tr[tr.length-1]);return o;}
+function thinRt(a){if(a.length<=250)return a;const k=Math.ceil(a.length/250),o=[];for(let i=0;i<a.length;i+=k)o.push(a[i]);o.push(a[a.length-1]);return o;}
+function resetTA(){TA.state='WAIT';TA.still=null;TA.lastT=null;TA.lastV=0;TA.el=0;TA.dist=0;TA.m={};TA.top=0;TA.topT=0;TA.trace=[];TA.rt=[];rbuf.length=0;}
 function finishRun(){
   if(TA.state!=='RUN')return;
   TA.state='WAIT';TA.still=TA.lastT;
   if(TA.top>=20){
-    const r={id:Date.now(),label:label,no:nextNo++,sid:rec?recId:null,m60:TA.m[60],m100:TA.m[100],d400:TA.m.d400,v400:TA.m.v400,top:TA.top,topT:TA.topT,trace:thin(TA.trace)};
+    const r={id:pb?'p'+(pbRuns.length+1):Date.now(),label:pb?'Putar ulang':label,no:pb?pbRuns.length+1:nextNo++,sid:(!pb&&rec)?recId:null,m60:TA.m[60],m100:TA.m[100],d400:TA.m.d400,v400:TA.m.v400,top:TA.top,topT:TA.topT,trace:thin(TA.trace),rt:thinRt(TA.rt)};
+    if(pb){pbRuns.unshift(r);runsDirty=true;return;}      // putar ulang: hasil hanya ditampilkan, tidak disimpan
     runs.unshift(r);if(runs.length>50)runs.pop();
-    ls.set('ecu_runs',runs);runsDirty=true;
+    taPick=null;ls.set('ecu_runs',runs);runsDirty=true;
     toast('Run selesai: '+esc(r.label)+' #'+r.no+' | 0-60 '+fmtT(r.m60)+' | 0-100 '+fmtT(r.m100)+' | 400 m '+fmtT(r.d400)+' | TOP '+Math.round(r.top));
   }
 }
@@ -390,6 +414,12 @@ function renderTA(){
   setMk('mk60',fmtT(TA.m[60]),TA.m[60]!=null);setMk('mk100',fmtT(TA.m[100]),TA.m[100]!=null);setMk('mk400',fmtT(TA.m.d400),TA.m.d400!=null);
   setMk('mkTop',TA.top>0?Math.round(TA.top)+' km/h':'--',TA.top>0&&st!=='RUN');
   if(runsDirty){runsDirty=false;renderRuns();}
+  if(pb&&st==='RUN'){                                  // putar ulang: kurva tumbuh mengikuti data
+    const lr={label:'Sedang jalan',no:'',trace:TA.trace.concat([[TA.el,TA.lastV]]),rt:TA.rt};
+    $('taChart').innerHTML=chartSvg(taView(),null,lr);
+    if(taFollow)taCur=TA.el;                           // garis penunjuk mengikuti ujung kurva (sampai kamu tap sendiri)
+    drawCursor();pbLive=true;
+  }else if(pbLive){pbLive=false;runsDirty=true;}
 }
 function bestOf(list){
   const b={};[['m60',1],['m100',1],['d400',1],['top',0]].forEach(([k,low])=>{const v=list.map(r=>r[k]).filter(x=>x!=null);b[k]=v.length?(low?Math.min(...v):Math.max(...v)):null;});
@@ -397,26 +427,72 @@ function bestOf(list){
 }
 function renderRuns(){
   const list=taView(),best=bestOf(list);
-  $('taSrc').innerHTML='<span class="chip'+(taSes?'':' on')+'" data-t="all">SEMUA RUN ('+runs.length+')</span>'+(taSes?'<span class="chip on">SESI: '+esc(taSesName)+' ('+list.length+')</span>':'');
-  $('taBody').innerHTML=list.length?list.map((r,i)=>'<tr><td class="l">'+(i===0&&!taSes?'* ':'')+esc(r.label)+' #'+r.no+'</td>'+
+  const pk=list.find(r=>String(r.id)===String(taPick))||list[0];
+  $('taSrc').innerHTML=pb?'<span class="chip on">PUTAR ULANG ('+list.length+' run)</span>':'<span class="chip'+(taSes?'':' on')+'" data-t="all">SEMUA RUN ('+runs.length+')</span>'+(taSes?'<span class="chip on">SESI: '+esc(taSesName)+' ('+list.length+')</span>':'');
+  $('taBody').innerHTML=list.length?list.map(r=>'<tr data-pick="'+r.id+'"><td class="l">'+(r===pk?'&#9654; ':'')+esc(r.label)+' #'+r.no+'</td>'+
     [['m60',1],['m100',1],['d400',1],['top',0]].map(([k,low])=>{
       const v=r[k];return '<td class="'+(v!=null&&v===best[k]?'best':'')+'">'+(v==null?'--':(low?v.toFixed(2)+'s':Math.round(v)))+'</td>';}).join('')+
-    '<td><button class="x" data-del="'+r.id+'">&times;</button></td></tr>').join(''):'<tr><td colspan="6" class="mini" style="text-align:center">'+(taSes?'Tidak ada run time attack di sesi ini.':'Belum ada run. Berhenti dulu, lalu gas dari diam.')+'</td></tr>';
+    '<td><button class="x" data-del="'+r.id+'">&times;</button></td></tr>').join(''):'<tr><td colspan="6" class="mini" style="text-align:center">'+(pb?'Belum ada run di bagian yang sudah diputar.':taSes?'Tidak ada run time attack di sesi ini.':'Belum ada run. Berhenti dulu, lalu gas dari diam.')+'</td></tr>';
   const lr=list[0];
-  $('lastRun').style.display=(lr&&!taSes)?'block':'none';
+  $('lastRun').style.display=(lr&&!taSes&&!pb)?'block':'none';
   if(lr)$('lastRunTxt').innerHTML='Run terakhir: <b>'+esc(lr.label)+' #'+lr.no+'</b><br>0-60 '+fmtT(lr.m60)+' · 0-100 '+fmtT(lr.m100)+' · 400 m '+fmtT(lr.d400)+(lr.v400?' ('+Math.round(lr.v400)+' km/h)':'')+' · TOP '+Math.round(lr.top)+' km/h';
-  $('taChart').innerHTML=chartSvg(list);
+  $('taChart').innerHTML=chartSvg(list,pk);
+  drawCursor();
 }
-function chartSvg(list){
+// Dua grafik dalam satu SVG: atas = speed, bawah = RPM, sumbu waktu sama supaya garis penunjuk lurus menembus keduanya
+function chartSvg(list,pk,liveRun){
+  pk=pk||list[0];
   let bestRun=null;list.forEach(r=>{if(r.m100!=null&&(!bestRun||r.m100<bestRun.m100))bestRun=r;});
   if(!bestRun)list.forEach(r=>{if(r.m60!=null&&(!bestRun||r.m60<bestRun.m60))bestRun=r;});
-  const sel=[];if(list[0])sel.push([list[0],'#ffeb3b']);if(bestRun&&bestRun!==list[0])sel.push([bestRun,'#00e676']);
-  let tmax=20;sel.forEach(([r])=>{const l=r.trace[r.trace.length-1];if(l&&l[0]>tmax)tmax=l[0];});
-  tmax=Math.ceil(tmax/5)*5;
-  let g='<g stroke="#222">';[0,30,60,90,120].forEach(v=>{const y=150-v/120*136;g+='<line x1="34" y1="'+y+'" x2="320" y2="'+y+'"/>';});
-  g+='</g><g font-size="11" font-family="sans-serif" fill="#aaa"><text x="2" y="154">0</text><text x="2" y="18">120</text><text x="34" y="167">0 s</text><text x="320" y="167" text-anchor="end">'+tmax+' s</text></g>';
-  sel.forEach(([r,c])=>{g+='<polyline fill="none" stroke="'+c+'" stroke-width="2" points="'+r.trace.map(([t,v])=>(34+t/tmax*286).toFixed(1)+','+(150-Math.min(v,120)/120*136).toFixed(1)).join(' ')+'"/>';});
-  return g;
+  const sel=[];
+  if(liveRun){sel.push([liveRun,'#ffffff']);if(bestRun)sel.push([bestRun,'#00e676']);}      // run yang sedang diputar + pembanding terbaik
+  else{if(pk)sel.push([pk,'#ffeb3b']);if(bestRun&&bestRun!==pk)sel.push([bestRun,'#00e676']);}
+  let tmax=20,rmax=4000;
+  sel.forEach(([r])=>{const l=r.trace[r.trace.length-1];if(l&&l[0]>tmax)tmax=l[0];const q=r.rt&&r.rt[r.rt.length-1];if(q&&q[0]>tmax)tmax=q[0];(r.rt||[]).forEach(p=>{if(p[1]>rmax)rmax=p[1];});});
+  tmax=Math.ceil(tmax/5)*5;rmax=Math.ceil(rmax/2000)*2000;
+  chartMeta={sel:sel,tmax:tmax,rmax:rmax};
+  const X=t=>(34+t/tmax*286).toFixed(1),YS=v=>(150-Math.min(v,120)/120*136).toFixed(1),YR=v=>(340-Math.min(v,rmax)/rmax*136).toFixed(1);
+  let g='<g stroke="#222">';
+  [0,30,60,90,120].forEach(v=>{const y=YS(v);g+='<line x1="34" y1="'+y+'" x2="320" y2="'+y+'"/>';});
+  [0,.25,.5,.75,1].forEach(f=>{const y=YR(rmax*f);g+='<line x1="34" y1="'+y+'" x2="320" y2="'+y+'"/>';});
+  g+='</g><g font-size="11" font-family="sans-serif" fill="#aaa"><text x="2" y="11" fill="#ffeb3b">SPEED (km/h)</text><text x="2" y="154">0</text><text x="2" y="26">120</text><text x="34" y="167">0 s</text><text x="320" y="167" text-anchor="end">'+tmax+' s</text>'+
+    '<text x="2" y="201" fill="#ffeb3b">RPM</text><text x="2" y="344">0</text><text x="2" y="216">'+rmax+'</text><text x="34" y="357">0 s</text><text x="320" y="357" text-anchor="end">'+tmax+' s</text></g>';
+  sel.forEach(([r,c])=>{
+    g+='<polyline fill="none" stroke="'+c+'" stroke-width="2" points="'+r.trace.map(([t,v])=>X(t)+','+YS(v)).join(' ')+'"/>';
+    if(r.rt&&r.rt.length)g+='<polyline fill="none" stroke="'+c+'" stroke-width="2" points="'+r.rt.map(q=>X(q[0])+','+YR(q[1])).join(' ')+'"/>';
+  });
+  if(sel.length&&!sel.some(([r])=>r.rt&&r.rt.length))g+='<text x="180" y="270" fill="#888" font-size="11" text-anchor="middle" font-family="sans-serif">Run ini belum punya data RPM</text>';
+  return g+'<g id="curG"></g>';
+}
+function interp(arr,t,col){
+  if(!arr||!arr.length||t<arr[0][0]||t>arr[arr.length-1][0])return null;
+  let i=0;while(i<arr.length-1&&arr[i+1][0]<t)i++;
+  const a=arr[i],b=arr[Math.min(i+1,arr.length-1)],f=b[0]>a[0]?(t-a[0])/(b[0]-a[0]):0;
+  return a[col]+(b[col]-a[col])*f;
+}
+// Garis penunjuk vertikal menembus grafik speed dan RPM + kotak nilai
+function drawCursor(){
+  const g=$('curG'),pop=$('taPop');if(!g)return;
+  const m=chartMeta;
+  if(taCur==null||!m.sel.length){g.innerHTML='';pop.style.display='none';return;}
+  const t=Math.min(taCur,m.tmax),x=34+t/m.tmax*286;
+  let h='<line x1="'+x.toFixed(1)+'" y1="8" x2="'+x.toFixed(1)+'" y2="352" stroke="#fff" stroke-width="1"/>',txt='<b>t = '+t.toFixed(2)+' s</b>';
+  m.sel.forEach(([r,c])=>{
+    const v=interp(r.trace,t,1),rp=interp(r.rt,t,1),tp=interp(r.rt,t,2),af=interp(r.rt,t,3);
+    if(v!=null)h+='<circle cx="'+x.toFixed(1)+'" cy="'+(150-Math.min(v,120)/120*136).toFixed(1)+'" r="4" fill="'+c+'" stroke="#000"/>';
+    if(rp!=null)h+='<circle cx="'+x.toFixed(1)+'" cy="'+(340-Math.min(rp,m.rmax)/m.rmax*136).toFixed(1)+'" r="4" fill="'+c+'" stroke="#000"/>';
+    const nm=(r.label+(r.no!==''?' #'+r.no:'')).slice(0,16);
+    txt+='<br><span style="color:'+c+'">&#9679;</span> '+esc(nm)+'<br>&nbsp;&nbsp;<b>'+(v!=null?Math.round(v)+' km/h':'--')+'</b> @ <b>'+(rp!=null?Math.round(rp)+' rpm':'--')+'</b>'+(tp!=null?'<br>&nbsp;&nbsp;TPS '+Math.round(tp)+'% · AFR '+(af!=null?af.toFixed(1):'--'):'');
+  });
+  g.innerHTML=h;pop.innerHTML=txt;pop.style.display='block';
+  if(x<165){pop.style.left=(x/330*100+2).toFixed(1)+'%';pop.style.right='auto';}else{pop.style.right=((330-x)/330*100+2).toFixed(1)+'%';pop.style.left='auto';}
+}
+function cursorFromEvent(e){
+  if(!chartMeta.sel.length)return;
+  taFollow=false;
+  const rc=$('taChart').getBoundingClientRect(),sx=(e.clientX-rc.left)/rc.width*330;
+  taCur=Math.max(0,Math.min(chartMeta.tmax,(sx-34)/286*chartMeta.tmax));
+  drawCursor();
 }
 
 /* ================= TAMPILAN: HEATMAP ================= */
@@ -439,6 +515,7 @@ function renderHM(){
   const M=curM(),k=Math.max(1,parseInt($('hmMin').value)||1),pct=$('hmPct').checked;
   $('pctWrap').style.display=hmMode==='FREQ'?'inline':'none';
   $('hmSrc').innerHTML='<span class="chip'+(hmSource==='live'?' on':'')+'" data-s="live">LIVE / REC</span>'+(HMSES?'<span class="chip'+(hmSource==='ses'?' on':'')+'" data-s="ses">SESI: '+esc(hmSesName)+'</span>':'');
+  if(pb)$('hmSrc').innerHTML='<span class="chip on">PUTAR ULANG</span>';
   const cnt={};let all=0;
   for(const c in M){let n=0;for(const t in M[c])for(const r in M[c][t])n+=M[c][t][r].count;cnt[c]=n;all+=n;}
   const keys=Object.keys(cnt).sort();
@@ -524,7 +601,7 @@ function pollLoop(g){
 if('geolocation' in navigator){
   navigator.geolocation.watchPosition(pos=>{
     $('gps').textContent='GPS OK';$('gps').style.color='#00e676';
-    if(demo)return;
+    if(demo||pb)return;
     const v=Math.max(0,(pos.coords.speed||0)*3.6);
     S.spd=v;feedSpeed(pos.timestamp,v);
   },err=>{$('gps').textContent='GPS ERR';$('gps').style.color='#ff1744';$('gps').title=err.message;},{enableHighAccuracy:true,maximumAge:0,timeout:15000});
@@ -550,7 +627,7 @@ function simStep(dt){
   return {tps:String(Math.round(SIM.tps)),rpm:String(Math.round(rpm)),afr:afr.toFixed(1),core:String(SIM.core),temp:SIM.temp.toFixed(1),
     fc:String(Math.round((13.4-afr)*4)),bm:(0.8+rpm/12000*1.5+load*0.9).toFixed(2),ijt:'470',it:(8+rpm/12000*26).toFixed(1),vbatt:(12.4+Math.min(rpm,3000)/3000*1.3).toFixed(2),seq:++SIM.seq,t:Date.now()};
 }
-function demoTick(){if(!demo)return;const d=simStep(0.05);S.spd=SIM.spd;onFrame(d);feedSpeed(Date.now(),SIM.spd);}
+function demoTick(){if(!demo||pb)return;const d=simStep(0.05);S.spd=SIM.spd;onFrame(d);feedSpeed(Date.now(),SIM.spd);}
 function startDemo(){gen++;demo=true;setConn(false);$('conn').style.display='flex';$('demoPanel').style.display='block';$('btDemo').textContent='STOP DEMO';
   $('connMsg').textContent='Mode DEMO: data simulasi. Kontrol ada di bagian bawah menu LIVE.';updateChip();}
 function stopDemo(){if(!demo)return;demo=false;$('demoPanel').style.display='none';$('btDemo').textContent='DEMO';updateChip();}
@@ -561,6 +638,7 @@ function syncSim(){$('bAuto').textContent=SIM.auto?'AUTO RUN...':'AUTO RUN';$('b
 const fmtDate=ms=>{const d=new Date(ms);return pad2(d.getDate())+'/'+pad2(d.getMonth()+1)+'/'+d.getFullYear()+' '+pad2(d.getHours())+':'+pad2(d.getMinutes());};
 const fmtDur=ms=>{const s=Math.round(ms/1000);return pad2(Math.floor(s/60))+':'+pad2(s%60);};
 async function recToggle(){
+  if(pb){toast('Keluar dari putar ulang dulu sebelum REC.',3000);return;}
   if(!rec){
     rec=true;rows=[];savedN=0;chunkNo=0;recId='s'+Date.now();recT0=Date.now();
     HMLIVE={};hmSource='live';hmSel=null;                  // heatmap mulai kosong tiap REC baru
@@ -588,7 +666,7 @@ async function openHist(){
   list.sort((a,b)=>b.startedAt-a.startedAt);
   $('histList').innerHTML=list.length?list.map(s=>{const nr=runs.filter(r=>r.sid===s.id).length;
     return '<div class="hi"><b>'+fmtDate(s.startedAt)+'</b><br>'+s.n+' data · '+fmtDur(s.endedAt-s.startedAt)+' · '+nr+' run time attack'+
-    '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"><button class="bt" data-open="'+s.id+'">BUKA DI HEATMAP</button><button class="bt" data-ta="'+s.id+'"'+(nr?'':' style="opacity:.45"')+'>BUKA DI TIME ATTACK</button><button class="bt" data-exp="'+s.id+'">EKSPOR .HTML</button><button class="bt" style="color:#ff1744;border-color:#ff1744" data-delses="'+s.id+'">HAPUS</button></div></div>';}).join(''):
+    '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"><button class="bt" data-pb="'+s.id+'" style="background:#00e676;color:#000;border:0">PUTAR ULANG</button><button class="bt" data-open="'+s.id+'">BUKA DI HEATMAP</button><button class="bt" data-ta="'+s.id+'"'+(nr?'':' style="opacity:.45"')+'>BUKA DI TIME ATTACK</button><button class="bt" data-exp="'+s.id+'">EKSPOR .HTML</button><button class="bt" style="color:#ff1744;border-color:#ff1744" data-delses="'+s.id+'">HAPUS</button></div></div>';}).join(''):
     'Belum ada sesi. Tekan REC untuk mulai merekam.';
 }
 async function openSession(id){
@@ -625,7 +703,65 @@ function buildLogHtml(meta,list,rr){
 }
 function buildRunsHtml(list){
   return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Time Attack</title><style>'+baseCss+'</style></head><body><h2>Catatan Time Attack</h2><p>'+fmtDate(Date.now())+'</p>'+
-    runsTable(list)+'<h3>Kurva speed (kuning = terakhir, hijau = terbaik)</h3><svg viewBox="0 0 330 170" width="480" style="background:#050505">'+chartSvg(list)+'</svg></body></html>';
+    runsTable(list)+'<h3>Kurva speed &amp; RPM (kuning = run dipilih/terakhir, hijau = terbaik)</h3><svg viewBox="0 0 330 360" width="480" style="background:#050505">'+chartSvg(list)+'</svg></body></html>';
+}
+
+/* ================= PUTAR ULANG SESI ================= */
+const fmtSec=x=>pad2(Math.floor(x/60))+':'+pad2(Math.floor(x%60));
+function pbReset(){
+  HMPB={};pbRuns=[];resetTA();lastRpm=0;
+  hist.rpm=[];hist.spd=[];hist.tps=[];hist.afr=[];
+  pb.i=0;pb.clock=0;pb.lastV=null;pb.lastFeed=-1e9;
+}
+function pbRow(d,k){
+  const t=pb.ts[k];
+  applyFrame(d,HMPB);
+  rtPush(t/1000,S.rpm,S.tps,S.afr);
+  const v=nz(d.speed);S.spd=v;
+  if(v!==pb.lastV||t-pb.lastFeed>=1000){pb.lastV=v;pb.lastFeed=t;feedSpeed(t,v);}   // meniru GPS: sampel baru tiap speed berubah atau tiap 1 detik
+  if(k===0&&v<=1&&TA.state==='WAIT')TA.state='READY';    // rekaman dimulai saat motor diam: anggap sudah siap (saat live biasanya sudah SIAP sebelum REC)
+}
+function pbSeek(i){
+  pbReset();
+  for(let k=0;k<i&&k<pb.rows.length;k++)pbRow(pb.rows[k],k);
+  pb.i=Math.min(i,pb.rows.length);
+  pb.clock=pb.i>0?(pb.ts[pb.i-1]-pb.t0)/1000:0;
+  runsDirty=true;
+}
+function pbBegin(list){
+  pb={rows:list,ts:list.map((d,i)=>{const v=num(d.t);return isNaN(v)?i*50:v;}),i:0,clock:0,spd:1,paused:false,lastV:null,lastFeed:-1e9};
+  pb.t0=pb.ts[0];
+  hmSource='live';hmCore='ALL';hmSel=null;taSes=null;taPick=null;taCur=null;
+  pbReset();runsDirty=true;updatePbBar();
+}
+async function pbStart(id){
+  if(rec){toast('Hentikan REC dulu.',3000);return;}
+  const list=await loadRows(id);
+  if(!list.length){toast('Sesi ini tidak punya data.',3000);return;}
+  pbBegin(list);
+  $('hist').style.display='none';gotoPage('live');
+}
+function pbExit(){
+  pb=null;resetTA();HMPB={};pbRuns=[];lastRpm=0;taPick=null;taCur=null;hmSel=null;
+  hist.rpm=[];hist.spd=[];hist.tps=[];hist.afr=[];runsDirty=true;updatePbBar();
+}
+function pbTick(){
+  if(!pb)return;
+  if(!pb.paused){
+    pb.clock+=0.05*pb.spd;
+    while(pb.i<pb.rows.length&&(pb.ts[pb.i]-pb.t0)/1000<=pb.clock){pbRow(pb.rows[pb.i],pb.i);pb.i++;}
+    if(pb.i>=pb.rows.length)pb.paused=true;
+  }
+  updatePbBar();
+}
+function updatePbBar(){
+  const bar=$('pbBar');bar.style.display=pb?'block':'none';
+  if(!pb)return;
+  const n=pb.rows.length,cur=pb.i>0?(pb.ts[pb.i-1]-pb.t0)/1000:0,tot=(pb.ts[n-1]-pb.t0)/1000;
+  $('pbPos').max=n;if(!pbDrag)$('pbPos').value=pb.i;
+  $('pbTime').textContent='PUTAR ULANG · '+fmtSec(cur)+' / '+fmtSec(tot)+' · '+pb.spd+'x'+(pb.i>=n?' · SELESAI':'');
+  $('pbPlay').textContent=pb.i>=n?'ULANG':pb.paused?'PUTAR':'JEDA';
+  $('pbSpd').textContent=pb.spd+'x';
 }
 
 /* ================= EVENT ================= */
@@ -648,11 +784,26 @@ $('histList').addEventListener('click',async e=>{
   const b=e.target.closest('button');if(!b)return;
   if(b.dataset.open)openSession(b.dataset.open);
   else if(b.dataset.ta)openTA(b.dataset.ta);
+  else if(b.dataset.pb)pbStart(b.dataset.pb);
   else if(b.dataset.exp)exportSession(b.dataset.exp);
   else if(b.dataset.delses&&confirm('Hapus sesi ini?')){await idbDelSession(b.dataset.delses);openHist();}
 });
 $('labelIn').addEventListener('input',e=>{label=e.target.value||'Tanpa nama';ls.set('ecu_label',label);nextNo=1;});
-$('taBody').addEventListener('click',e=>{const b=e.target.closest('[data-del]');if(!b)return;runs=runs.filter(r=>String(r.id)!==b.dataset.del);ls.set('ecu_runs',runs);runsDirty=true;});
+$('taBody').addEventListener('click',e=>{
+  const d=e.target.closest('[data-del]');
+  if(d){if(!pb){runs=runs.filter(r=>String(r.id)!==d.dataset.del);ls.set('ecu_runs',runs);}else{pbRuns=pbRuns.filter(r=>String(r.id)!==d.dataset.del);}
+        if(String(taPick)===d.dataset.del)taPick=null;runsDirty=true;return;}
+  const tr=e.target.closest('tr[data-pick]');if(tr){taPick=tr.dataset.pick;runsDirty=true;}
+});
+$('taChart').addEventListener('pointerdown',cursorFromEvent);
+$('taChart').addEventListener('pointermove',e=>{if(e.buttons)cursorFromEvent(e);});
+$('taPop').addEventListener('click',()=>{taFollow=false;taCur=null;drawCursor();});
+$('pbPlay').addEventListener('click',()=>{if(!pb)return;if(pb.i>=pb.rows.length){pbSeek(0);pb.paused=false;}else pb.paused=!pb.paused;updatePbBar();});
+$('pbSpd').addEventListener('click',()=>{if(!pb)return;const o=[1,2,4,8];pb.spd=o[(o.indexOf(pb.spd)+1)%o.length];updatePbBar();});
+$('pbExit').addEventListener('click',pbExit);
+$('pbPos').addEventListener('pointerdown',()=>{pbDrag=true;});
+['pointerup','pointercancel','change'].forEach(ev=>$('pbPos').addEventListener(ev,()=>{pbDrag=false;}));
+$('pbPos').addEventListener('input',e=>{if(pb){pbSeek(parseInt(e.target.value)||0);updatePbBar();}});
 $('delLast').addEventListener('click',()=>{runs.shift();ls.set('ecu_runs',runs);runsDirty=true;});
 $('taClear').addEventListener('click',()=>{
   if(confirm(taSes?'Hapus semua run time attack di sesi ini?':'Hapus semua catatan time attack?')){
@@ -692,6 +843,7 @@ function tick(force){
   if(rec)updateRecBtn();
 }
 setInterval(demoTick,50);
+setInterval(pbTick,50);
 setInterval(()=>tick(false),100);
 setInterval(()=>{hz=frameCount;frameCount=0;updateChip();},1000);
 setInterval(()=>{if(rec)saveChunk();},5000);
