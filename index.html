@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>ECU DUMMY TESTER</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body { background: #000; color: #fff; font-family: monospace; text-align: center; padding: 20px; }
+        .box { border: 2px solid #333; padding: 20px; border-radius: 15px; margin-bottom: 10px; }
+        .val { font-size: 3em; font-weight: bold; color: #00e676; }
+        #status { color: #ffeb3b; }
+        #dbg { color: #888; font-size: .8em; margin-top: 8px; word-break: break-all; }
+        input { background: #111; color: #fff; border: 1px solid #555; border-radius: 6px; padding: 6px; width: 130px; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <div>STATUS KONEKSI: <span id="status">SCANNING...</span></div>
+        <div id="ip_found">Mencari Wemos di Jaringan...</div>
+        <div style="margin-top:10px">Awalan IP: <input id="prefix" value="192.168.43"></div>
+        <div id="dbg"></div>
+    </div>
+
+    <div class="box">
+        <h2>ENGINE RPM (DUMMY)</h2>
+        <div class="val" id="rpm">0</div>
+    </div>
+
+    <div class="box">
+        <h2>GPS SPEED</h2>
+        <div class="val" id="speed">0</div>
+        <div id="gps_stat">GPS: SEARCHING...</div>
+    </div>
+
+    <script>
+        let wemosIP = "";
+        let isFound = false;
+        let scanRound = 0;
+        let lastErr = "";
+        const $ = id => document.getElementById(id);
+
+        // Opsi fetch: 'targetAddressSpace' memberi tahu Chrome bahwa tujuannya jaringan lokal
+        // (supaya halaman HTTPS boleh memanggil http://192.168.x.x setelah izin diberikan)
+        function req(ip) {
+            const ctl = new AbortController();
+            setTimeout(() => ctl.abort(), 1500);
+            return fetch(`http://${ip}/data`, { mode: 'cors', targetAddressSpace: 'local', signal: ctl.signal, cache: 'no-store' })
+                .then(r => r.json());
+        }
+
+        function found(ip) {
+            if (isFound) return;
+            isFound = true;
+            wemosIP = ip;
+            localStorage.setItem('lastIP', ip);
+            $('status').innerText = "LOCKED!";
+            $('ip_found').innerText = "Ditemukan di: " + ip;
+            startLoop();
+        }
+
+        // 1. Scan IP otomatis (diulang tiap 5 detik sampai ketemu)
+        async function startScan() {
+            if (isFound) return;
+            scanRound++;
+            $('status').innerText = "SCANNING... (putaran " + scanRound + ")";
+            const prefix = $('prefix').value.trim();
+            localStorage.setItem('prefix', prefix);
+
+            // coba IP terakhir yang berhasil lebih dulu
+            const last = localStorage.getItem('lastIP');
+            const list = [];
+            if (last) list.push(last);
+            for (let i = 1; i < 255; i++) list.push(`${prefix}.${i}`);
+
+            list.forEach(ip => {
+                req(ip).then(d => { if (d.core === "DUMMY") found(ip); })
+                       .catch(e => { lastErr = e.name + ": " + e.message; });
+            });
+
+            setTimeout(() => {
+                if (!isFound) {
+                    $('dbg').innerText = "Belum ketemu. Error terakhir: " + (lastErr || "-");
+                    startScan();
+                }
+            }, 5000);
+        }
+
+        // 2. Loop ambil data
+        function startLoop() {
+            setInterval(() => {
+                req(wemosIP).then(d => {
+                    $('rpm').innerText = d.rpm;
+                    $('dbg').innerText = "";
+                }).catch(e => { $('dbg').innerText = "Data gagal: " + e.name + ": " + e.message; });
+            }, 100);
+        }
+
+        // 3. GPS HP (butuh HTTPS atau localhost)
+        if ("geolocation" in navigator) {
+            navigator.geolocation.watchPosition((pos) => {
+                let kmh = Math.round((pos.coords.speed || 0) * 3.6);
+                $('speed').innerText = kmh;
+                $('gps_stat').innerText = "GPS: LOCKED";
+            }, (err) => {
+                $('gps_stat').innerText = "GPS ERROR: " + err.message;
+            }, { enableHighAccuracy: true });
+        } else {
+            $('gps_stat').innerText = "GPS tidak didukung browser ini";
+        }
+
+        $('prefix').value = localStorage.getItem('prefix') || "192.168.43";
+        startScan();
+    </script>
+</body>
+</html>
