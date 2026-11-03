@@ -10,20 +10,21 @@
   html,body{margin:0;background:#000;color:#fff;font-family:sans-serif;text-align:center}
   #app{max-width:520px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column}
   header{position:sticky;top:0;z-index:20;background:#111;border-bottom:2px solid #333;padding-top:env(safe-area-inset-top)}
-  .top{display:flex;align-items:center;gap:6px;padding:8px;font-family:monospace;font-size:12px;font-weight:bold}
-  .top .sp1{flex:1}
+  .top{display:flex;flex-wrap:nowrap;align-items:center;gap:6px;padding:8px;font-family:monospace;font-size:11px;font-weight:bold;white-space:nowrap;min-height:50px}
+  .top>*{flex:none}
+  .top .sp1{flex:1 1 0;min-width:0}
   button{font-family:inherit;cursor:pointer}
-  .bt{background:#222;color:#fff;border:1px solid #555;border-radius:8px;padding:8px 10px;font-size:12px;font-weight:bold}
-  .chip2{background:#ff1744;color:#fff;border:0;border-radius:14px;padding:6px 10px;font-size:12px;font-weight:bold}
+  .bt{background:#222;color:#fff;border:1px solid #555;border-radius:8px;padding:8px 10px;font-size:12px;font-weight:bold;white-space:nowrap}
+  .chip2{background:#ff1744;color:#fff;border:0;border-radius:14px;padding:7px 10px;font-size:11px;font-weight:bold;min-width:84px}
   .chip2.ok{background:#00e676;color:#000}
-  .rec{background:#2a0000;color:#ff1744;border:1px solid #ff1744;border-radius:8px;padding:8px 10px;font-size:12px;font-weight:bold}
+  .rec{background:#2a0000;color:#ff1744;border:1px solid #ff1744;border-radius:8px;padding:8px 6px;font-size:12px;font-weight:bold;min-width:78px;text-align:center}
   .rec.on{background:#ff1744;color:#fff;animation:blink 1s infinite}
   @keyframes blink{50%{background:#7a0020}}
   .conn{padding:0 8px 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px}
   .conn input{flex:1;min-width:120px;background:#000;color:#fff;border:1px solid #555;border-radius:8px;padding:9px;font-size:14px;font-family:monospace}
   #connMsg{width:100%;text-align:left;color:#888;font-size:11px}
-  #toast{display:none;background:#00695c;color:#fff;font-size:12px;font-weight:bold;padding:8px;text-align:left}
-  #warn{display:none;background:#ff1744;color:#fff;font-size:13px;font-weight:bold;padding:7px;animation:blink2 .5s infinite}
+  #toast{display:none;position:absolute;left:0;right:0;top:100%;z-index:30;background:#00695c;color:#fff;font-size:12px;font-weight:bold;padding:8px;text-align:left}
+  #warn{display:none;position:absolute;left:0;right:0;top:100%;z-index:29;background:#ff1744;color:#fff;font-size:13px;font-weight:bold;padding:7px;animation:blink2 .5s infinite}
   @keyframes blink2{50%{opacity:.45}}
   main{flex:1;padding:8px}
   .pg{display:none}
@@ -84,7 +85,7 @@
 <header>
   <div class="top">
     <button class="chip2" id="chip">TERPUTUS</button>
-    <span id="gps" style="color:#888">GPS: --</span>
+    <span id="gps" style="color:#888">GPS --</span>
     <span class="sp1"></span>
     <button class="rec" id="recBtn">&#9679; REC</button>
     <button class="bt" id="histBtn">RIWAYAT</button>
@@ -140,6 +141,7 @@
 
 <!-- ================= TIME ATTACK ================= -->
 <section class="pg" id="p_ta">
+  <div id="taSrc" style="text-align:left;margin-bottom:4px"></div>
   <div class="card">
     <div class="row"><div><span class="pill" id="tapill" style="background:#ffea00">TUNGGU DIAM</span></div>
       <div class="big" id="taT" style="color:#ffeb3b;font-size:34px">0.00s</div></div>
@@ -298,6 +300,8 @@ function onFrame(d){
 const TA={state:'WAIT',still:null,el:0,dist:0,m:{},top:0,topT:0,trace:[],nextTr:0,lastT:null,lastV:0};
 let label=ls.get('ecu_label','Setting A'),nextNo=1;
 let runs=ls.get('ecu_runs',[]),runsDirty=true;
+let taSes=null,taSesName='';                       // null = semua run; isi = hanya run dari 1 sesi REC
+const taView=()=>taSes?runs.filter(r=>r.sid===taSes):runs;
 
 function feedSpeed(tMs,v){
   const t=tMs/1000;
@@ -392,15 +396,16 @@ function bestOf(list){
   return b;
 }
 function renderRuns(){
-  const best=bestOf(runs);
-  $('taBody').innerHTML=runs.length?runs.map((r,i)=>'<tr><td class="l">'+(i===0?'* ':'')+esc(r.label)+' #'+r.no+'</td>'+
+  const list=taView(),best=bestOf(list);
+  $('taSrc').innerHTML='<span class="chip'+(taSes?'':' on')+'" data-t="all">SEMUA RUN ('+runs.length+')</span>'+(taSes?'<span class="chip on">SESI: '+esc(taSesName)+' ('+list.length+')</span>':'');
+  $('taBody').innerHTML=list.length?list.map((r,i)=>'<tr><td class="l">'+(i===0&&!taSes?'* ':'')+esc(r.label)+' #'+r.no+'</td>'+
     [['m60',1],['m100',1],['d400',1],['top',0]].map(([k,low])=>{
       const v=r[k];return '<td class="'+(v!=null&&v===best[k]?'best':'')+'">'+(v==null?'--':(low?v.toFixed(2)+'s':Math.round(v)))+'</td>';}).join('')+
-    '<td><button class="x" data-del="'+r.id+'">&times;</button></td></tr>').join(''):'<tr><td colspan="6" class="mini" style="text-align:center">Belum ada run. Berhenti dulu, lalu gas dari diam.</td></tr>';
-  const lr=runs[0];
-  $('lastRun').style.display=lr?'block':'none';
+    '<td><button class="x" data-del="'+r.id+'">&times;</button></td></tr>').join(''):'<tr><td colspan="6" class="mini" style="text-align:center">'+(taSes?'Tidak ada run time attack di sesi ini.':'Belum ada run. Berhenti dulu, lalu gas dari diam.')+'</td></tr>';
+  const lr=list[0];
+  $('lastRun').style.display=(lr&&!taSes)?'block':'none';
   if(lr)$('lastRunTxt').innerHTML='Run terakhir: <b>'+esc(lr.label)+' #'+lr.no+'</b><br>0-60 '+fmtT(lr.m60)+' · 0-100 '+fmtT(lr.m100)+' · 400 m '+fmtT(lr.d400)+(lr.v400?' ('+Math.round(lr.v400)+' km/h)':'')+' · TOP '+Math.round(lr.top)+' km/h';
-  $('taChart').innerHTML=chartSvg(runs);
+  $('taChart').innerHTML=chartSvg(list);
 }
 function chartSvg(list){
   let bestRun=null;list.forEach(r=>{if(r.m100!=null&&(!bestRun||r.m100<bestRun.m100))bestRun=r;});
@@ -488,7 +493,7 @@ function setConn(ok,msg){
 function updateChip(){
   const c=$('chip');
   c.className='chip2'+(connected||demo?' ok':'');
-  c.textContent=demo?'DEMO · '+hz+' Hz':connected?'TERHUBUNG · '+hz+' Hz':'TERPUTUS';
+  c.textContent=demo?'DEMO '+hz+'Hz':connected?'ON '+hz+'Hz':'TERPUTUS';
 }
 let wl=null;
 async function keepAwake(){try{if('wakeLock' in navigator&&!wl){wl=await navigator.wakeLock.request('screen');wl.addEventListener('release',()=>{wl=null;});}}catch(e){}}
@@ -518,12 +523,12 @@ function pollLoop(g){
 /* ================= GPS HP ================= */
 if('geolocation' in navigator){
   navigator.geolocation.watchPosition(pos=>{
-    $('gps').textContent='GPS: LOCKED';$('gps').style.color='#00e676';
+    $('gps').textContent='GPS OK';$('gps').style.color='#00e676';
     if(demo)return;
     const v=Math.max(0,(pos.coords.speed||0)*3.6);
     S.spd=v;feedSpeed(pos.timestamp,v);
-  },err=>{$('gps').textContent='GPS: ERROR';$('gps').style.color='#ff1744';$('gps').title=err.message;},{enableHighAccuracy:true,maximumAge:0,timeout:15000});
-}else{$('gps').textContent='GPS: tidak ada';}
+  },err=>{$('gps').textContent='GPS ERR';$('gps').style.color='#ff1744';$('gps').title=err.message;},{enableHighAccuracy:true,maximumAge:0,timeout:15000});
+}else{$('gps').textContent='GPS --';}
 
 /* ================= DEMO (simulasi, tanpa Wemos) ================= */
 const SIM={rb:1400,tps:0,spd:0,temp:72,core:2,gas:false,auto:false,autoT:0,brake:false,accK:1.05,off:0,seq:0};
@@ -576,19 +581,25 @@ async function saveChunk(){
   try{await idbPut('chunks',{k:recId+':'+String(chunkNo).padStart(5,'0'),rows:part});chunkNo++;savedN=rows.length;
       await idbPut('sessions',{id:recId,startedAt:recT0,endedAt:Date.now(),n:rows.length});}catch(e){}
 }
-function updateRecBtn(){const b=$('recBtn');b.className='rec'+(rec?' on':'');b.innerHTML=rec?'&#9632; STOP '+fmtDur(Date.now()-recT0):'&#9679; REC';}
+function updateRecBtn(){const b=$('recBtn');b.className='rec'+(rec?' on':'');b.innerHTML=rec?'&#9632; '+fmtDur(Date.now()-recT0):'&#9679; REC';}
 async function openHist(){
   $('hist').style.display='block';$('histList').textContent='Memuat...';
   let list=[];try{list=await idbAll('sessions');}catch(e){}
   list.sort((a,b)=>b.startedAt-a.startedAt);
-  $('histList').innerHTML=list.length?list.map(s=>'<div class="hi"><b>'+fmtDate(s.startedAt)+'</b><br>'+s.n+' data · '+fmtDur(s.endedAt-s.startedAt)+
-    '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"><button class="bt" data-open="'+s.id+'">BUKA DI HEATMAP</button><button class="bt" data-exp="'+s.id+'">EKSPOR .HTML</button><button class="bt" style="color:#ff1744;border-color:#ff1744" data-delses="'+s.id+'">HAPUS</button></div></div>').join(''):
+  $('histList').innerHTML=list.length?list.map(s=>{const nr=runs.filter(r=>r.sid===s.id).length;
+    return '<div class="hi"><b>'+fmtDate(s.startedAt)+'</b><br>'+s.n+' data · '+fmtDur(s.endedAt-s.startedAt)+' · '+nr+' run time attack'+
+    '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"><button class="bt" data-open="'+s.id+'">BUKA DI HEATMAP</button><button class="bt" data-ta="'+s.id+'"'+(nr?'':' style="opacity:.45"')+'>BUKA DI TIME ATTACK</button><button class="bt" data-exp="'+s.id+'">EKSPOR .HTML</button><button class="bt" style="color:#ff1744;border-color:#ff1744" data-delses="'+s.id+'">HAPUS</button></div></div>';}).join(''):
     'Belum ada sesi. Tekan REC untuk mulai merekam.';
 }
 async function openSession(id){
   const list=await loadRows(id);
   HMSES=buildM(list);hmSesName=fmtDate(+id.slice(1));hmSource='ses';hmCore='ALL';hmSel=null;
   $('hist').style.display='none';gotoPage('hm');
+}
+function openTA(id){
+  taSes=id;taSesName=fmtDate(+id.slice(1));runsDirty=true;
+  $('hist').style.display='none';gotoPage('ta');
+  if(!taView().length)toast('Sesi ini tidak punya run time attack.',4000);
 }
 async function exportSession(id){
   const metas=await idbAll('sessions');const meta=metas.find(m=>m.id===id);if(!meta)return;
@@ -636,14 +647,18 @@ $('histClose').addEventListener('click',()=>{$('hist').style.display='none';});
 $('histList').addEventListener('click',async e=>{
   const b=e.target.closest('button');if(!b)return;
   if(b.dataset.open)openSession(b.dataset.open);
+  else if(b.dataset.ta)openTA(b.dataset.ta);
   else if(b.dataset.exp)exportSession(b.dataset.exp);
   else if(b.dataset.delses&&confirm('Hapus sesi ini?')){await idbDelSession(b.dataset.delses);openHist();}
 });
 $('labelIn').addEventListener('input',e=>{label=e.target.value||'Tanpa nama';ls.set('ecu_label',label);nextNo=1;});
 $('taBody').addEventListener('click',e=>{const b=e.target.closest('[data-del]');if(!b)return;runs=runs.filter(r=>String(r.id)!==b.dataset.del);ls.set('ecu_runs',runs);runsDirty=true;});
 $('delLast').addEventListener('click',()=>{runs.shift();ls.set('ecu_runs',runs);runsDirty=true;});
-$('taClear').addEventListener('click',()=>{if(confirm('Hapus semua catatan time attack?')){runs=[];ls.set('ecu_runs',runs);runsDirty=true;}});
-$('taExp').addEventListener('click',()=>{if(runs.length)download('TimeAttack_'+Date.now()+'.html',buildRunsHtml(runs));});
+$('taClear').addEventListener('click',()=>{
+  if(confirm(taSes?'Hapus semua run time attack di sesi ini?':'Hapus semua catatan time attack?')){
+    runs=taSes?runs.filter(r=>r.sid!==taSes):[];ls.set('ecu_runs',runs);runsDirty=true;}});
+$('taSrc').addEventListener('click',e=>{const c=e.target.closest('.chip');if(!c||c.dataset.t!=='all')return;taSes=null;runsDirty=true;});
+$('taExp').addEventListener('click',()=>{const l=taView();if(l.length)download('TimeAttack_'+(taSes?'sesi_'+taSes.slice(1):Date.now())+'.html',buildRunsHtml(l));});
 $('hmModes').addEventListener('click',e=>{const c=e.target.closest('.chip');if(!c)return;if(c.dataset.m==='DELTA'&&!BASE)return;hmMode=c.dataset.m;renderHM();});
 $('hmCores').addEventListener('click',e=>{const c=e.target.closest('.chip');if(!c)return;hmCore=c.dataset.c;hmSel=null;renderHM();});
 $('hmSrc').addEventListener('click',e=>{const c=e.target.closest('.chip');if(!c)return;hmSource=c.dataset.s;hmCore='ALL';hmSel=null;renderHM();});
