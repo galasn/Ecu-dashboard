@@ -7,6 +7,7 @@
 <meta name="theme-color" content="#000000">
 <style>
   *{box-sizing:border-box}
+  html,body{overscroll-behavior-y:contain}
   html,body{margin:0;background:#000;color:#fff;font-family:sans-serif;text-align:center}
   #app{max-width:520px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column}
   header{position:sticky;top:0;z-index:20;background:#111;border-bottom:2px solid #333;padding-top:env(safe-area-inset-top)}
@@ -108,6 +109,10 @@
     <div class="row"><button class="bt" id="pbPlay">JEDA</button><input type="range" id="pbPos" min="0" max="0" value="0"><button class="bt" id="pbSpd">1x</button><button class="bt" id="pbExit" style="color:#ff1744;border-color:#ff1744">KELUAR</button></div>
     <div class="mini" id="pbTime" style="padding:4px 0 0"></div>
   </div>
+  <div id="resumeBar" style="display:none;background:#3e2723;border-top:1px solid #555;padding:8px;font-size:12px;text-align:left">
+    <div id="resumeTxt"></div>
+    <div style="margin-top:6px;display:flex;gap:8px"><button class="bt" id="resumeYes" style="background:#00e676;color:#000;border:0">LANJUTKAN REKAMAN</button><button class="bt" id="resumeNo">TUTUP SESI</button></div>
+  </div>
   <div id="toast"></div>
   <div id="warn">AFR KURUS di beban tinggi! Kurangi gas</div>
 </header>
@@ -158,6 +163,10 @@
   <div class="card">
     <div class="row"><div><span class="pill" id="tapill" style="background:#ffea00">TUNGGU DIAM</span></div>
       <div class="big" id="taT" style="color:#ffeb3b;font-size:34px">0.00s</div></div>
+    <div class="mini" id="taHint" style="margin:6px 0 2px"></div>
+    <div class="row" style="margin:6px 0">
+      <button class="bt" id="taReady">PAKSA SIAP</button><button class="bt" id="taStop" style="border-color:#ff1744;color:#ff1744">PAKSA STOP</button>
+    </div>
     <div class="row" style="margin-top:6px">
       <div><div class="lb">SPEED</div><div class="big" id="taV" style="font-size:24px">0</div></div>
       <div><div class="lb">JARAK (m)</div><div class="big" id="taD" style="font-size:24px">0</div></div>
@@ -215,7 +224,7 @@
       </div>
       <div class="mini" style="margin-top:6px">Sensor narrowband hanya akurat di sekitar 14,7. Di luar rentang dipercaya, mode KOREKSI hanya menampilkan arah (&#9650; kurus, &#9660; kaya), bukan persen. Perubahan filter stabil berlaku untuk data baru dan sesi yang dibuka ulang.</div>
     </details>
-    <div style="text-align:right;margin-bottom:6px"><button class="bt" id="hmBase">SIMPAN PEMBANDING</button> <button class="bt" id="hmClear">RESET</button></div>
+    <div style="text-align:right;margin-bottom:6px"><button class="bt" id="hmFile">BUKA FILE</button><input type="file" id="hmFileIn" accept=".html,.htm,.txt,.json" multiple style="display:none"> <button class="bt" id="hmBase">SIMPAN PEMBANDING</button> <button class="bt" id="hmClear">RESET</button></div>
   </div>
   <div class="mini" id="hmSum" style="margin-bottom:6px"></div>
   <div class="hmw"><table class="hm"><thead id="hmHead"></thead><tbody id="hmBody"></tbody></table></div>
@@ -237,6 +246,7 @@
 'use strict';
 const $=id=>document.getElementById(id);
 const ls={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v);}catch(e){return d;}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}};
+const lsDel=k=>{try{localStorage.removeItem(k);}catch(e){}};
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const pad2=n=>String(n).padStart(2,'0');
 const num=v=>{const s=String(v==null?'':v).trim();return /^-?\d+(\.\d+)?$/.test(s)?parseFloat(s):NaN;};
@@ -263,6 +273,7 @@ const S={rpm:0,tps:0,afr:0,spd:0,temp:0,fc:0,bm:0,it:0,ijt:0,vb:0,core:'-'};
 const hist={rpm:[],spd:[],tps:[],afr:[]};
 let page='live',lastRpm=0,frameCount=0,hz=0,lastWarn=0;
 let connected=false,demo=false,ip=ls.get('ecu_ip',''),gen=0,failCount=0,lastSeq=-1;
+let lastFrameMs=0;
 let rec=false,rows=[],recRej=[],recId=null,recT0=0,savedN=0,chunkNo=0;
 let idb=null;
 
@@ -357,7 +368,7 @@ function rtPush(absT,rpm,tps,afr){
   if(TA.state==='RUN'){const el=absT-TA.t0abs;if(el>=TA.rtNext){TA.rt.push([el,rpm,tps,afr]);TA.rtNext=el+0.1;}}
 }
 function onFrame(d,absT){
-  frameCount++;ACC.n++;
+  frameCount++;ACC.n++;lastFrameMs=Date.now();
   if(pb)return;                                    // saat putar ulang, data live diabaikan
   applyFrame(d,HMLIVE,stabLive,absT*1000);
   rtPush(absT,S.rpm,S.tps,S.afr);
@@ -432,13 +443,26 @@ function parseBatch(txt,tMid){
 }
 
 /* ================= TIME ATTACK ================= */
-const TA={state:'WAIT',still:null,el:0,dist:0,m:{},top:0,topT:0,trace:[],nextTr:0,lastT:null,lastV:0,t0abs:0,rt:[],rtNext:0};
+const TA={state:'WAIT',still:null,el:0,dist:0,m:{},top:0,topT:0,trace:[],nextTr:0,lastT:null,lastV:0,t0abs:0,rt:[],rtNext:0,base:0};
 let label=ls.get('ecu_label','Setting A'),nextNo=1;
 let runs=ls.get('ecu_runs',[]),runsDirty=true;
 let taSes=null,taSesName='';                       // null = semua run; isi = hanya run dari 1 sesi REC
 const taView=()=>pb?pbRuns:(taSes?runs.filter(r=>r.sid===taSes):runs);
 
+// Time attack hanya boleh jalan kalau data ECU sedang masuk (kalau tidak, GPS yang bergerak sendirian menghasilkan run sampah)
+const dataFresh=()=>pb||(Date.now()-lastFrameMs<(TA.state==='RUN'?5000:2500));
+function cancelRun(){
+  TA.state='NOCONN';TA.m={};TA.dist=0;TA.el=0;TA.top=0;TA.topT=0;TA.trace=[];TA.rt=[];
+  toast('Run dibatalkan: data ECU berhenti masuk (koneksi putus).',6000);
+}
 function feedSpeed(tMs,v){
+  if(!dataFresh()){
+    if(TA.state==='RUN')cancelRun();
+    TA.state='NOCONN';TA.still=null;TA.lastT=null;TA.base=0;
+    return;
+  }
+  if(v<=1)TA.base=0;                                 // titik nol hanya berlaku selama GPS "goyang" di atas 1 km/h
+  v=Math.max(0,v-TA.base);
   const t=tMs/1000;
   if(TA.lastT==null){TA.lastT=t;TA.lastV=v;}
   const t0=TA.lastT,v0=TA.lastV;TA.lastT=t;TA.lastV=v;
@@ -469,9 +493,27 @@ function stepRun(dt,v0,v){
   if(TA.el>=TA.nextTr){TA.trace.push([TA.el,v]);TA.nextTr=TA.el+0.25;}
   if(v<=1&&TA.el>2)finishRun();
 }
+function taForceStop(){
+  if(pb){toast('Tidak tersedia saat putar ulang.',3000);return;}
+  if(TA.state!=='RUN'){toast('Tidak ada run yang sedang berjalan.',3000);return;}
+  TA.trace.push([TA.el,TA.lastV]);
+  const had=runs.length;
+  finishRun();                                       // hasil run disimpan seperti biasa (dengan syarat top speed minimal 20 km/h)
+  TA.still=null;TA.base=0;                           // setelah stop manual, tunggu motor benar-benar diam lagi
+  if(runs.length===had)toast('Run terlalu pendek (top speed di bawah 20 km/h), tidak disimpan.',4000);
+}
+function taForceReady(){
+  if(pb){toast('Tidak tersedia saat putar ulang.',3000);return;}
+  if(TA.state==='RUN'){toast('Run sedang berjalan. Pakai PAKSA STOP.',3000);return;}
+  if(!dataFresh()){toast('Belum ada data ECU. Sambungkan Wemos dulu.',3000);return;}
+  const v=S.spd;
+  if(v>8){toast('Speed masih '+Math.round(v)+' km/h. Tombol ini hanya untuk GPS yang goyang saat motor diam (di bawah 8 km/h).',5000);return;}
+  TA.base=v;TA.state='READY';TA.still=TA.lastT;
+  toast('SIAP. Titik nol GPS = '+v.toFixed(1)+' km/h (run mulai saat speed naik 2 km/h dari titik itu).',4000);
+}
 function thin(tr){if(tr.length<=150)return tr;const k=Math.ceil(tr.length/150),o=[];for(let i=0;i<tr.length;i+=k)o.push(tr[i]);o.push(tr[tr.length-1]);return o;}
 function thinRt(a){if(a.length<=250)return a;const k=Math.ceil(a.length/250),o=[];for(let i=0;i<a.length;i+=k)o.push(a[i]);o.push(a[a.length-1]);return o;}
-function resetTA(){TA.state='WAIT';TA.still=null;TA.lastT=null;TA.lastV=0;TA.el=0;TA.dist=0;TA.m={};TA.top=0;TA.topT=0;TA.trace=[];TA.rt=[];rbuf.length=0;}
+function resetTA(){TA.base=0;TA.state='WAIT';TA.still=null;TA.lastT=null;TA.lastV=0;TA.el=0;TA.dist=0;TA.m={};TA.top=0;TA.topT=0;TA.trace=[];TA.rt=[];rbuf.length=0;}
 function finishRun(){
   if(TA.state!=='RUN')return;
   TA.state='WAIT';TA.still=TA.lastT;
@@ -523,8 +565,14 @@ function renderLive(){
 function setMk(id,txt,hit){const e=$(id);e.querySelector('.mv').textContent=txt;e.classList.toggle('hit',hit);}
 function renderTA(){
   const st=TA.state,p=$('tapill');
-  p.textContent=st==='RUN'?'BERJALAN':st==='READY'?'SIAP':'TUNGGU DIAM';
-  p.style.background=st==='RUN'?'#00e676':st==='READY'?'#2196f3':'#ffea00';
+  p.textContent=st==='RUN'?'BERJALAN':st==='READY'?'SIAP':st==='NOCONN'?'TIDAK ADA DATA':'TUNGGU DIAM';
+  p.style.background=st==='RUN'?'#00e676':st==='READY'?'#2196f3':st==='NOCONN'?'#777':'#ffea00';
+  $('taHint').textContent=pb?'Putar ulang: status mengikuti data rekaman.':
+    st==='RUN'?'HIJAU: timer sedang menghitung. Selesai otomatis saat motor berhenti, atau tekan PAKSA STOP.':
+    st==='READY'?'BIRU: siap. Timer mulai saat speed naik di atas 2 km/h. (Angka di bawah = hasil run terakhir, tidak menghitung.)':
+    st==='NOCONN'?'ABU-ABU: belum ada data dari Wemos/ECU, time attack tidak jalan.':
+    'KUNING: menunggu motor diam (speed ≤ 1 km/h) selama 1 detik. Kalau GPS goyang, pakai PAKSA SIAP.';
+  $('taStop').style.opacity=st==='RUN'?'1':'.4';$('taReady').style.opacity=(st==='RUN'||st==='READY')?'.4':'1';
   $('taT').textContent=TA.el.toFixed(2)+'s';
   $('taV').textContent=Math.round(S.spd);$('taD').textContent=Math.round(TA.dist);
   setMk('mk60',fmtT(TA.m[60]),TA.m[60]!=null);setMk('mk100',fmtT(TA.m[100]),TA.m[100]!=null);setMk('mk400',fmtT(TA.m.d400),TA.m.d400!=null);
@@ -828,10 +876,11 @@ async function recToggle(){
     rec=true;rows=[];savedN=0;chunkNo=0;recId='s'+Date.now();recT0=Date.now();
     HMLIVE=newHM();stabLive=makeStab();hmSource='live';hmSel=null;                  // heatmap mulai kosong tiap REC baru
     recRej=[];try{await idbPut('sessions',{id:recId,startedAt:recT0,endedAt:recT0,n:0,rej:[]});}catch(e){}
+    ls.set('ecu_rec_active',{id:recId,t0:recT0});
     keepAwake();toast('REC dimulai. Heatmap dikosongkan.',3000);
   }else{
     rec=false;
-    await saveChunk();
+    await saveChunk();lsDel('ecu_rec_active');
     const meta={id:recId,startedAt:recT0,endedAt:Date.now(),n:rows.length,rej:recRej};
     try{await idbPut('sessions',meta);toast('Sesi tersimpan di Riwayat: '+rows.length+' data, '+fmtDur(meta.endedAt-meta.startedAt)+'.');}
     catch(e){toast('Penyimpanan di HP tidak tersedia, mengunduh file .html...');download('ECU_LOG_'+recT0+'.html',buildLogHtml(meta,rows,runs.filter(r=>r.sid===recId)));}
@@ -842,28 +891,83 @@ async function saveChunk(){
   if(savedN>=rows.length)return;
   const part=rows.slice(savedN);
   try{await idbPut('chunks',{k:recId+':'+String(chunkNo).padStart(5,'0'),rows:part});chunkNo++;savedN=rows.length;
-      await idbPut('sessions',{id:recId,startedAt:recT0,endedAt:Date.now(),n:rows.length,rej:recRej});}catch(e){}
+      await idbPut('sessions',{id:recId,startedAt:recT0,endedAt:Date.now(),n:rows.length,rej:recRej});
+      ls.set('ecu_rec_active',{id:recId,t0:recT0,n:rows.length,at:Date.now()});}catch(e){}
 }
 function updateRecBtn(){const b=$('recBtn');b.className='rec'+(rec?' on':'');b.innerHTML=rec?'&#9632; '+fmtDur(Date.now()-recT0):'&#9679; REC';}
+const SESM={};                                       // cache info sesi (untuk nama tanggal)
 async function openHist(){
   $('hist').style.display='block';$('histList').textContent='Memuat...';
   let list=[];try{list=await idbAll('sessions');}catch(e){}
   list.sort((a,b)=>b.startedAt-a.startedAt);
-  $('histList').innerHTML=list.length?list.map(s=>{const nr=runs.filter(r=>r.sid===s.id).length;
-    return '<div class="hi"><b>'+fmtDate(s.startedAt)+'</b><br>'+s.n+' data · '+fmtDur(s.endedAt-s.startedAt)+' · '+nr+' run time attack'+
+  list.forEach(m=>{SESM[m.id]=m;});
+  $('histList').innerHTML=list.length?'<div style="margin-bottom:10px"><button class="bt" data-merge="1" style="background:#ff9800;color:#000;border:0">GABUNGKAN YANG DICENTANG</button> <span class="mini">centang 2 sesi atau lebih</span></div>'+
+    list.map(s=>{const nr=runs.filter(r=>r.sid===s.id).length,live=rec&&s.id===recId;
+    return '<div class="hi"><label style="font-size:13px"><input type="checkbox" data-sel="'+s.id+'"'+(live?' disabled':'')+'> <b>'+fmtDate(s.startedAt)+'</b></label>'+(live?' <span style="color:#ff1744">(sedang direkam)</span>':'')+'<br>'+s.n+' data · '+fmtDur(s.endedAt-s.startedAt)+' · '+nr+' run time attack'+
     '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"><button class="bt" data-pb="'+s.id+'" style="background:#00e676;color:#000;border:0">PUTAR ULANG</button><button class="bt" data-open="'+s.id+'">BUKA DI HEATMAP</button><button class="bt" data-ta="'+s.id+'"'+(nr?'':' style="opacity:.45"')+'>BUKA DI TIME ATTACK</button><button class="bt" data-exp="'+s.id+'">EKSPOR .HTML</button><button class="bt" style="color:#ff1744;border-color:#ff1744" data-delses="'+s.id+'">HAPUS</button></div></div>';}).join(''):
     'Belum ada sesi. Tekan REC untuk mulai merekam.';
 }
+const sesDate=id=>fmtDate(SESM[id]?SESM[id].startedAt:+id.slice(1));
 async function openSession(id){
   const list=await loadRows(id);
-  HMSES=buildM(list);hmSesName=fmtDate(+id.slice(1));hmSource='ses';hmCore='ALL';hmSel=null;
+  HMSES=buildM(list);hmSesName=sesDate(id);hmSource='ses';hmCore='ALL';hmSel=null;
   $('hist').style.display='none';gotoPage('hm');
 }
 function openTA(id){
-  taSes=id;taSesName=fmtDate(+id.slice(1));runsDirty=true;
+  taSes=id;taSesName=sesDate(id);runsDirty=true;
   $('hist').style.display='none';gotoPage('ta');
   if(!taView().length)toast('Sesi ini tidak punya run time attack.',4000);
 }
+// Gabungkan beberapa sesi (urut waktu) jadi satu sesi baru; sesi asli dihapus setelah berhasil
+async function mergeSessions(ids){
+  if(rec&&ids.indexOf(recId)>=0){toast('Hentikan REC dulu.',3000);return false;}
+  const metas=(await idbAll('sessions')).filter(m=>ids.indexOf(m.id)>=0).sort((a,b)=>a.startedAt-b.startedAt);
+  if(metas.length<2)return false;
+  let all=[],rej=[];
+  for(const m of metas){const r=await loadRows(m.id);all=all.concat(r);rej=rej.concat(m.rej||[]);}
+  const nid='s'+Date.now(),CH=4000;
+  for(let i=0,c=0;i<all.length;i+=CH,c++)await idbPut('chunks',{k:nid+':'+String(c).padStart(5,'0'),rows:all.slice(i,i+CH)});
+  await idbPut('sessions',{id:nid,startedAt:metas[0].startedAt,endedAt:metas[metas.length-1].endedAt,n:all.length,rej:rej.slice(-3000),merged:ids});
+  runs.forEach(r=>{if(ids.indexOf(r.sid)>=0)r.sid=nid;});ls.set('ecu_runs',runs);runsDirty=true;
+  for(const m of metas)await idbDelSession(m.id);
+  toast('Sesi digabung: '+all.length+' data dari '+metas.length+' sesi.');
+  return nid;
+}
+// Lanjutkan rekaman yang terputus (halaman termuat ulang saat REC aktif)
+async function checkResume(){
+  const m=ls.get('ecu_rec_active',null);if(!m||rec)return;
+  let meta=null;try{meta=(await idbAll('sessions')).find(x=>x.id===m.id);}catch(e){}
+  if(!meta){lsDel('ecu_rec_active');return;}
+  $('resumeTxt').innerHTML='Rekaman sebelumnya terputus: sesi <b>'+fmtDate(meta.startedAt)+'</b>, '+meta.n+' data ('+fmtDur(meta.endedAt-meta.startedAt)+'). Lanjutkan di sesi yang sama?';
+  $('resumeBar').style.display='block';$('resumeBar').dataset.id=meta.id;
+}
+async function resumeRec(id){
+  const metas=await idbAll('sessions'),meta=metas.find(x=>x.id===id);if(!meta)return;
+  const ch=await idbAll('chunks',IDBKeyRange.bound(id+':',id+':\uffff'));
+  rows=await loadRows(id);
+  recId=id;recT0=meta.startedAt;savedN=rows.length;chunkNo=ch.length;recRej=(meta.rej||[]).slice();rec=true;
+  HMLIVE=buildM(rows);stabLive=makeStab();hmSource='live';hmSel=null;      // heatmap dilanjutkan dari data yang sudah terekam
+  ls.set('ecu_rec_active',{id:recId,t0:recT0,n:rows.length,at:Date.now()});
+  $('resumeBar').style.display='none';keepAwake();updateRecBtn();
+  toast('Rekaman dilanjutkan ('+rows.length+' data sebelumnya).',4000);
+}
+// ---- buka file log (.html hasil ekspor / file lama) ----
+function readJsonArray(txt,start){
+  let depth=0,inStr=false,esc2=false;
+  for(let i=start;i<txt.length;i++){
+    const c=txt[i];
+    if(inStr){if(esc2)esc2=false;else if(c==='\\')esc2=true;else if(c==='"')inStr=false;continue;}
+    if(c==='"')inStr=true;else if(c==='[')depth++;
+    else if(c===']'){depth--;if(depth===0){try{return JSON.parse(txt.slice(start,i+1));}catch(e){return null;}}}
+  }
+  return null;
+}
+function extractLogs(text){
+  const re=/const\s+SAVED_LOGS\s*=\s*\[/g;let m,best=[];
+  while((m=re.exec(text))!==null){const arr=readJsonArray(text,m.index+m[0].length-1);if(arr&&arr.length>best.length)best=arr;}
+  return best;
+}
+
 async function exportSession(id){
   const metas=await idbAll('sessions');const meta=metas.find(m=>m.id===id);if(!meta)return;
   const list=await loadRows(id);
@@ -915,7 +1019,9 @@ function pbSeek(i){
   runsDirty=true;
 }
 function pbBegin(list){
-  pb={rows:list,ts:list.map((d,i)=>{const v=num(d.t);return isNaN(v)?i*50:v;}),i:0,clock:0,spd:1,paused:false,lastV:null,lastFeed:-1e9};
+  let off=0,prev=null;                              // celah waktu besar (mis. rekaman terputus lalu dilanjutkan) dipadatkan jadi 1 detik
+  const tsList=list.map((d,i)=>{let v=num(d.t);if(isNaN(v))v=i*50;let a=v+off;if(prev!=null&&(a-prev>5000||a<prev)){off+=(prev+1000)-a;a=prev+1000;}prev=a;return a;});
+  pb={rows:list,ts:tsList,i:0,clock:0,spd:1,paused:false,lastV:null,lastFeed:-1e9};
   pb.t0=pb.ts[0];
   hmSource='live';hmCore='ALL';hmSel=null;taSes=null;taPick=null;taCur=null;
   pbReset();runsDirty=true;updatePbBar();
@@ -968,6 +1074,12 @@ $('histBtn').addEventListener('click',openHist);
 $('histClose').addEventListener('click',()=>{$('hist').style.display='none';});
 $('histList').addEventListener('click',async e=>{
   const b=e.target.closest('button');if(!b)return;
+  if(b.dataset.merge){
+    const ids=Array.from(document.querySelectorAll('#histList input[data-sel]:checked')).map(x=>x.dataset.sel);
+    if(ids.length<2){toast('Centang minimal 2 sesi.',3000);return;}
+    if(!confirm('Gabungkan '+ids.length+' sesi menjadi satu? Sesi aslinya akan dihapus.'))return;
+    await mergeSessions(ids);openHist();return;
+  }
   if(b.dataset.open)openSession(b.dataset.open);
   else if(b.dataset.ta)openTA(b.dataset.ta);
   else if(b.dataset.pb)pbStart(b.dataset.pb);
@@ -994,6 +1106,8 @@ $('delLast').addEventListener('click',()=>{runs.shift();ls.set('ecu_runs',runs);
 $('taClear').addEventListener('click',()=>{
   if(confirm(taSes?'Hapus semua run time attack di sesi ini?':'Hapus semua catatan time attack?')){
     runs=taSes?runs.filter(r=>r.sid!==taSes):[];ls.set('ecu_runs',runs);runsDirty=true;}});
+$('taStop').addEventListener('click',taForceStop);
+$('taReady').addEventListener('click',taForceReady);
 $('taSrc').addEventListener('click',e=>{const c=e.target.closest('.chip');if(!c||c.dataset.t!=='all')return;taSes=null;runsDirty=true;});
 $('taExp').addEventListener('click',()=>{const l=taView();if(l.length)download('TimeAttack_'+(taSes?'sesi_'+taSes.slice(1):Date.now())+'.html',buildRunsHtml(l));});
 $('hmModes').addEventListener('click',e=>{const c=e.target.closest('.chip');if(!c)return;if(c.dataset.m==='DELTA'&&!BASE)return;hmMode=c.dataset.m;renderHM();});
@@ -1005,6 +1119,21 @@ $('hmStable').addEventListener('change',e=>{stableOn=e.target.checked;ls.set('ec
 [['cfgTgtC','tgtCruise'],['cfgTgtL','tgtLoad'],['cfgLoadTps','loadTps'],['cfgTrustLo','trustLo'],['cfgTrustHi','trustHi'],['cfgMaxSd','maxSd'],['cfgStabMs','stabMs'],['cfgStabRpm','stabRpm'],['cfgStabTps','stabTps']].forEach(([id,k])=>{
   $(id).value=CFG[k];
   $(id).addEventListener('change',e=>{const v=parseFloat(e.target.value);if(!isNaN(v)){CFG[k]=v;ls.set('ecu_cfg',CFG);renderHM();}});
+});
+$('resumeYes').addEventListener('click',()=>resumeRec($('resumeBar').dataset.id));
+$('resumeNo').addEventListener('click',()=>{lsDel('ecu_rec_active');$('resumeBar').style.display='none';toast('Sesi ditutup. Datanya tetap ada di Riwayat.',3000);});
+$('hmFile').addEventListener('click',()=>$('hmFileIn').click());
+$('hmFileIn').addEventListener('change',async e=>{
+  const files=Array.from(e.target.files);if(!files.length)return;
+  let all=[];
+  for(const f of files){all=all.concat(extractLogs(await f.text()));}
+  e.target.value='';
+  if(!all.length){toast('Tidak ada data log di file itu.',4000);return;}
+  if(pb)pbExit();
+  const noT=all.some(r=>isNaN(num(r.t)));
+  HMSES=buildM(all);hmSesName=files.length===1?files[0].name.slice(0,24):files.length+' file';hmSource='ses';hmCore='ALL';hmSel=null;
+  toast('Dibuka: '+files.length+' file, '+all.length+' baris.'+(noT?' File tanpa stempel waktu: matikan "hanya frame stabil" untuk hasil yang tepat.':'')+(all.length>200000?' Data besar, bisa terasa berat.':''),9000);
+  gotoPage('hm');
 });
 $('hmBase').addEventListener('click',()=>{
   const V=view(curM(),hmCore);BASE={};let n=0;
@@ -1040,7 +1169,20 @@ setInterval(()=>{hz=frameCount;frameCount=0;updateChip();if(page==='live')render
 setInterval(()=>{if(rec)saveChunk();},5000);
 
 $('ipIn').value=ip;$('labelIn').value=label;$('hmStable').checked=stableOn;
-idbOpen().catch(()=>{});
+idbOpen().then(checkResume).catch(()=>{});
+/* Tombol back: sekali hanya memunculkan pesan, dua kali dalam 2 detik baru keluar.
+   (Chrome hanya menghormati ini setelah halaman disentuh, jadi dipasang pada sentuhan pertama.) */
+let backT=0,backArmed=false;
+function armBack(){if(backArmed)return;backArmed=true;try{history.pushState({ecu:1},'');}catch(e){}}
+['pointerdown','touchstart','keydown'].forEach(ev=>document.addEventListener(ev,armBack,{once:true}));
+window.addEventListener('popstate',()=>{
+  if(!backArmed)return;
+  const now=Date.now();
+  if(now-backT<2000){backArmed=false;history.back();return;}
+  backT=now;toast('Tekan back sekali lagi dalam 2 detik untuk keluar dari dashboard.',2000);
+  try{history.pushState({ecu:1},'');}catch(e){}
+});
+window.addEventListener('beforeunload',e=>{if(rec){e.preventDefault();e.returnValue='';}});
 gotoPage('live');
 if(ip)connect();
 </script>
